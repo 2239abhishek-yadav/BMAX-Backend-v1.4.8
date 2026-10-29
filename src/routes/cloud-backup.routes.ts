@@ -50,6 +50,11 @@ router.post('/upload', async (req: Request, res: Response) => {
   } catch (err:any) { return res.status(Number(err?.status || 502)).json({ success:false, error:err?.message || 'Cloud backup upload failed.' }); }
 });
 
+router.get('/companies', async (req: Request, res: Response) => {
+  try { return res.json({ success:true, data: await callHostinger({ action:'company_list', ...sessionDetails(req) }) }); }
+  catch (err:any) { return res.status(Number(err?.status || 502)).json({ success:false, error:err?.message || 'Unable to list companies for this account.' }); }
+});
+
 router.get('/list', async (req: Request, res: Response) => {
   try { return res.json({ success:true, data: await callHostinger({ action:'backup_list', ...sessionDetails(req) }) }); }
   catch (err:any) { return res.status(Number(err?.status || 502)).json({ success:false, error:err?.message || 'Unable to list cloud backups.' }); }

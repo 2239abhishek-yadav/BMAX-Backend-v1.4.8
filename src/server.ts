@@ -136,8 +136,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // Initialize DB and start
 try {
   initializeDatabase();
-  // v1.14.53: remove legacy invoice template/design data. The new system starts clean.
-  try { db.prepare("DELETE FROM firm_settings WHERE settingType='document_format'").run(); } catch {}
+  // Preserve customer document-format settings across startup and upgrades.
   ensureCrmSchema();
   // Render public web services must bind to 0.0.0.0.
   // Keep the packaged Electron/local backend bound to loopback.

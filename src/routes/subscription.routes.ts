@@ -61,13 +61,15 @@ router.post('/register', async (req: Request, res: Response) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
     const confirmPassword = String(req.body?.confirmPassword || '');
+    // Optional free-form referral code; preserve user-entered text, bounded for storage safety.
+    const referralCode = String(req.body?.referralCode || '').trim().slice(0, 500);
     if (name.length < 2) return res.status(400).json({ success:false, error:'Please enter your full name.' });
     if (!/^\d{10,15}$/.test(phone)) return res.status(400).json({ success:false, error:'Please enter a valid mobile number with country code if required.' });
     if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ success:false, error:'Please enter a valid email address.' });
     if (password.length < 8) return res.status(400).json({ success:false, error:'Password must be at least 8 characters.' });
     if (password !== confirmPassword) return res.status(400).json({ success:false, error:'Passwords do not match.' });
     // PHP stores a password_hash() hash; plaintext is sent only over HTTPS and never logged.
-    const account = await phpAccountRequest('register', { name, phone, email, password });
+    const account = await phpAccountRequest('register', { name, phone, email, password, referralCode });
     const id = String(account.id || uuidv4());
     const now = new Date().toISOString();
     const existing: any = db.prepare('SELECT id FROM users WHERE email=? LIMIT 1').get(email);

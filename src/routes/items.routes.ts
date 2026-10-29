@@ -239,6 +239,21 @@ router.post('/', (req: Request, res: Response) => {
       enableBatchTracking ? 1 : 0, enableSerialTracking ? 1 : 0,
       isActive ? 1 : 0, isFavorite ? 1 : 0, allowNegativeStock ? 1 : 0, decimalEnabled ? 1 : 0, now, now);
 
+    // Opening stock entered while creating an item belongs to the firm's default
+    // store as well as the firm-wide item balance. Otherwise billing from Main
+    // Store sees zero because store-level inventory_stock has no row yet.
+    // Keep other stores untouched; their quantities must be transferred explicitly.
+    const openingQty = Math.max(0, Number(openingStock) || 0);
+    if (openingQty > 0) {
+      const defaultStore: any = db.prepare(
+        "SELECT id FROM godowns WHERE firmId=? AND COALESCE(isActive,1)=1 ORDER BY CASE WHEN LOWER(TRIM(name))='main store' THEN 0 ELSE 1 END, isDefault DESC, name ASC LIMIT 1"
+      ).get(firmId);
+      if (defaultStore?.id) {
+        db.prepare('INSERT INTO inventory_stock(id,firmId,itemId,godownId,quantity,updatedAt) VALUES(?,?,?,?,?,?)')
+          .run(uuidv4(), firmId, id, defaultStore.id, openingQty, now);
+      }
+    }
+
     const item = db.prepare('SELECT * FROM items WHERE id = ?').get(id);
     res.status(201).json({ success: true, data: item });
   } catch (err: any) {

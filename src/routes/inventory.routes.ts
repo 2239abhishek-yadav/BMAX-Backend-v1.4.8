@@ -122,9 +122,26 @@ router.post('/validate-document', (req: Request, res: Response) => {
 
       const godownId = line.godownId || null;
       if (godownId) {
-        const stock:any = db.prepare(
+        let stock:any = db.prepare(
           'SELECT quantity FROM inventory_stock WHERE firmId=? AND itemId=? AND godownId=? LIMIT 1'
         ).get(firmId, line.itemId, godownId);
+        // Safe legacy reconciliation: older item creation flows could store firm-wide
+        // currentStock without any location row. Seed the selected store ONLY when
+        // this item has no location rows at all; never duplicate stock already assigned
+        // to another store. This makes existing opening balances billable without
+        // overwriting or moving any recorded store stock.
+        if (!stock) {
+          const anyStoreRow:any = db.prepare(
+            'SELECT id FROM inventory_stock WHERE firmId=? AND itemId=? LIMIT 1'
+          ).get(firmId, line.itemId);
+          const legacyBalance = Math.max(0, Number(item.currentStock || 0));
+          if (!anyStoreRow && legacyBalance > 0) {
+            const now = new Date().toISOString();
+            db.prepare('INSERT INTO inventory_stock(id,firmId,itemId,godownId,quantity,updatedAt) VALUES(?,?,?,?,?,?)')
+              .run(`legacy-${firmId}-${line.itemId}-${godownId}`, firmId, line.itemId, godownId, legacyBalance, now);
+            stock = { quantity: legacyBalance };
+          }
+        }
         if (Number(stock?.quantity || 0) - required < -0.0001) {
           return res.json({
             success:true,
