@@ -1,0 +1,13 @@
+B-MAX Render backend v1.4.9
+
+Render service root directory: BMAX_RENDER_BACKEND_V1.4.9 (the directory containing package.json).
+Build command: npm install && npm run build
+Start command: npm start
+
+Important:
+- Existing Render environment variables ko preserve karen; blind replace/delete na karen.
+- BMAX_PHP_ACCOUNT_API_URL must point to the Hostinger endpoint, e.g. https://bmaxerp.com/API/bmax-account-api.php
+- BMAX_API_TOKEN must exactly match the token in Hostinger config.php; do not expose it in logs or source control.
+- Render's local SQLite folder is not the customer cloud backup store. Customer cloud backups are encrypted on Hostinger using the PHP API.
+- After deploy, test GET /api/subscription/diagnostics on the Render host.
+- Do not claim continuous live multi-PC transaction synchronization: the current cloud backup path is encrypted SQLite snapshot/restore.

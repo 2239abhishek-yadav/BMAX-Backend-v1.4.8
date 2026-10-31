@@ -27,7 +27,7 @@ router.get('/plans', (_req: Request, res: Response) => {
 
 // All customer accounts are authoritative on the PHP account server so the same
 // credentials work on every PC through the Render account API proxy.
-async function phpAccountRequest(action: 'register'|'login'|'company', payload: Record<string, any>) {
+async function phpAccountRequest(action: 'register'|'login'|'company'|'diagnostics', payload: Record<string, any>) {
   const endpoint = String(process.env.BMAX_PHP_ACCOUNT_API_URL || '').trim();
   const token = String(process.env.BMAX_PHP_ACCOUNT_API_TOKEN || '').trim();
   if (!endpoint || !token) {
@@ -43,16 +43,52 @@ async function phpAccountRequest(action: 'register'|'login'|'company', payload: 
     body: JSON.stringify({ action, ...payload }),
     signal: AbortSignal.timeout(25000),
   });
-  const data: any = await response.json().catch(() => ({}));
+  const responseText = await response.text();
+  let data: any = {};
+  try { data = responseText ? JSON.parse(responseText) : {}; }
+  catch {
+    const err: any = new Error(`Hostinger account API returned a non-JSON response (HTTP ${response.status}). Check the PHP endpoint and hosting runtime.`);
+    err.status = response.status >= 400 && response.status < 600 ? response.status : 502;
+    err.action = action;
+    console.error('[B-MAX central account API]', { action, httpStatus: response.status, responseType: response.headers.get('content-type') || 'unknown', error: 'non-JSON response' });
+    throw err;
+  }
   if (!response.ok || data?.success !== true) {
     const err: any = new Error(data?.error || `Central account server returned HTTP ${response.status}.`);
     err.status = response.status >= 400 && response.status < 600 ? response.status : 502;
     if (typeof data?.requestId === 'string') err.requestId = data.requestId;
+    err.action = String(data?.action || action);
+    err.code = String(data?.errorCode || 'CENTRAL_ACCOUNT_API_ERROR');
     console.error('[B-MAX central account API]', { action, httpStatus: response.status, requestId: err.requestId || null, error: String(err.message).slice(0, 160) });
     throw err;
   }
-  return data.data || {};
+  return data.data || data;
 }
+
+function centralAccountError(err: any, fallback: string) {
+  return {
+    success: false,
+    error: err?.message || fallback,
+    ...(typeof err?.requestId === 'string' ? { requestId: err.requestId } : {}),
+    ...(typeof err?.action === 'string' ? { action: err.action } : {}),
+    ...(typeof err?.code === 'string' ? { code: err.code } : {}),
+  };
+}
+
+// Safe diagnostic relay: no credentials, customer PII, password hashes or row counts
+// leave Hostinger. This remains useful when the hosting account has no visible error_log.
+router.get('/diagnostics', async (_req: Request, res: Response) => {
+  try {
+    const raw: any = await phpAccountRequest('diagnostics', {});
+    const tables: Record<string, any> = {};
+    for (const [name, check] of Object.entries(raw?.tables || {}) as any[]) {
+      tables[name] = { exists: Boolean(check?.exists), missingColumns: Array.isArray(check?.missingColumns) ? check.missingColumns : [] };
+    }
+    return res.json({ success: true, data: { databaseConnection: raw?.databaseConnection || 'unknown', schemaReady: raw?.schemaReady === true, tables } });
+  } catch (err: any) {
+    return res.status(Number(err?.status || 502)).json(centralAccountError(err, 'Unable to check Hostinger account API.'));
+  }
+});
 
 router.post('/register', async (req: Request, res: Response) => {
   try {
@@ -81,7 +117,7 @@ router.post('/register', async (req: Request, res: Response) => {
     }
     return res.status(201).json({ success:true, data:{ id, name, phone, email, registered:true, otpRequired:false } });
   } catch (err: any) {
-    return res.status(Number(err?.status || 503)).json({ success:false, error:err?.message || 'Registration failed. Please try again.' });
+    return res.status(Number(err?.status || 503)).json(centralAccountError(err, 'Registration failed. Please try again.'));
   }
 });
 
@@ -107,7 +143,7 @@ router.post('/login', async (req: Request, res: Response) => {
     }
     res.json({ success:true, data:{ ...account, localUser:user, subscription:account?.subscription || getLocalSubscriptionState() } });
   } catch (err: any) {
-    res.status(Number(err?.status || 503)).json({ success:false, error:err?.message || 'Sign-in failed. Check your email and password.' });
+    res.status(Number(err?.status || 503)).json(centralAccountError(err, 'Sign-in failed. Check your email and password.'));
   }
 });
 
@@ -125,7 +161,7 @@ router.post('/company-created', async (req: Request, res: Response) => {
     });
     return res.json({ success:true, data });
   } catch (err: any) {
-    return res.status(Number(err?.status || 503)).json({ success:false, error:err?.message || 'Unable to sync company details to the central account server.' });
+    return res.status(Number(err?.status || 503)).json(centralAccountError(err, 'Unable to sync company details to the central account server.'));
   }
 });
 
