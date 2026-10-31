@@ -35,7 +35,7 @@ export interface SubscriptionState {
 }
 
 const LICENSE_SERVER_URL = String(
-  process.env.BMAX_LICENSE_SERVER_URL || 'https://bmax-v1-4-0.onrender.com'
+  process.env.BMAX_LICENSE_SERVER_URL || 'https://bmax-backend-v1-4-8.onrender.com'
 ).replace(/\/$/, '');
 // Current B-MAX desktop distribution uses the embedded backend registry.
 // Central licensing is deliberately disabled in this offline-code build so a

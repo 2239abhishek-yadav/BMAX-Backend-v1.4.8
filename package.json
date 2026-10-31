@@ -1,6 +1,6 @@
 {
   "name": "bmax-backend",
-  "version": "1.4.8",
+  "version": "1.4.9",
   "description": "B-MAX Backend Server",
   "main": "dist/server.js",
   "scripts": {
@@ -14,14 +14,14 @@
     "better-sqlite3": "13.0.3",
     "cors": "^2.8.5",
     "express": "4.22.3",
-    "multer": "2.4.0",
+    "multer": "2.5.0",
     "uuid": "14.0.2",
     "date-fns": "^3.3.1",
     "jspdf": "4.2.1",
     "jspdf-autotable": "5.0.8",
     "xlsx": "npm:@e965/xlsx@0.20.3",
     "qrcode": "^1.5.3",
-    "nodemailer": "10.0.13"
+    "nodemailer": "10.3.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",
@@ -36,7 +36,7 @@
   "overrides": {
     "tar": "7.5.22",
     "@xmldom/xmldom": "0.9.12",
-    "joi": "17.13.7",
+    "joi": "17.13.8",
     "js-yaml": "5.4.2",
     "minimatch@^9.0.4": "9.0.7",
     "minimatch@^3.0.0": "3.1.4",

@@ -82,6 +82,17 @@ export function accessControl(req:Request,res:Response,next:NextFunction){
 
   if(!module)return next();
 
+  // First-company creation is the bootstrap operation that establishes the firm
+  // context. It must require a signed-in account, but cannot require firmId before
+  // the firm exists. The /firms route separately binds ownership to that account.
+  const isInitialFirmCreation = req.method === 'POST' && req.path.replace(/^\/api\/?/, '').replace(/\/$/, '') === 'firms';
+  if (isInitialFirmCreation) {
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(401).json({ error: 'Authenticated account context is required to create a company.', code: 'ACCOUNT_CONTEXT_REQUIRED' });
+    }
+    return next();
+  }
+
   const isMutation = actionFor(req.method) !== 'view';
   if (!subscription.allowed && isMutation && transactionModules.has(module)) {
     return res.status(402).json({
@@ -138,10 +149,22 @@ export function accessControl(req:Request,res:Response,next:NextFunction){
     }
   }
 
-  // Existing permission checks are applied when the request provides the
-  // optional identity/firm context. The subscription lock above is independent
-  // of those headers and therefore cannot be bypassed.
-  if(!email || !firmId) return next();
+  // FAIL CLOSED: mapped business modules must never skip role authorization
+  // because identity or company context is missing. Client headers are context
+  // only; checkPermission still verifies an active local membership for the
+  // supplied email + firm before allowing the operation.
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+    return res.status(401).json({
+      error: 'Authenticated account context is required for this operation.',
+      code: 'ACCOUNT_CONTEXT_REQUIRED',
+    });
+  }
+  if (!firmId) {
+    return res.status(400).json({
+      error: 'Company context is required for this operation.',
+      code: 'FIRM_CONTEXT_REQUIRED',
+    });
+  }
   const result=checkPermission(email,firmId,module,actionFor(req.method));
   if(result.allowed)return next();
   return res.status(403).json({error:`Permission denied: ${actionFor(req.method)} access to ${module}`,code:'PERMISSION_DENIED'});
