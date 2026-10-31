@@ -35,6 +35,15 @@ function sessionDetails(req: Request) {
   return { accountSessionToken: token, email };
 }
 
+router.get('/health', async (_req: Request, res: Response) => {
+  try {
+    const data:any = await callHostinger({ action:'backup_diagnostics' });
+    return res.json({ success:true, data });
+  } catch (err:any) {
+    return res.status(Number(err?.status || 502)).json({ success:false, error:err?.message || 'Unable to check Hostinger backup configuration.' });
+  }
+});
+
 router.post('/upload', async (req: Request, res: Response) => {
   try {
     const session = sessionDetails(req);
