@@ -38,8 +38,8 @@ export const ADDON_RATES = {
 } as const;
 
 export const PLAN_LIMITS = {
-  Starter: { firms: 1, users: 1, multipleStores: false },
-  Business: { firms: 2, users: 3, multipleStores: true },
+  Starter: { firms: 1, users: 2, multipleStores: false },
+  Business: { firms: 2, users: 5, multipleStores: true },
   Professional: { firms: 3, users: 5, multipleStores: true },
 } as const;
 

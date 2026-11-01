@@ -227,7 +227,7 @@ export function getLocalSubscriptionState(): SubscriptionState | null {
         .run(inferredPlanCode, inferredName, new Date().toISOString());
     } catch (_) {}
   }
-  const storedBase = storedPlanCode === 'STARTER' ? { firms: 1, users: 1 } : storedPlanCode === 'BUSINESS' ? { firms: 2, users: 3 } : storedPlanCode === 'PROFESSIONAL' ? { firms: 3, users: 5 } : null;
+  const storedBase = storedPlanCode === 'STARTER' ? { firms: 1, users: 2 } : storedPlanCode === 'BUSINESS' ? { firms: 2, users: 5 } : storedPlanCode === 'PROFESSIONAL' ? { firms: 3, users: 5 } : null;
   return {
     installationId: row.installationId,
     deviceId: row.deviceId,
@@ -506,7 +506,7 @@ function resolveEmbeddedActivation(licenseKey: string) {
   const durationMonths = verifiedCode.durationCode === '1Y' ? 12 : verifiedCode.durationCode === '3Y' ? 36 : 60;
   const durationName = verifiedCode.durationCode === '1Y' ? '1 Year' : verifiedCode.durationCode === '3Y' ? '3 Years' : '5 Years';
   const baseMaxFirms = verifiedCode.planCode === 'STARTER' ? 1 : verifiedCode.planCode === 'BUSINESS' ? 2 : 3;
-  const baseMaxUsers = verifiedCode.planCode === 'STARTER' ? 1 : verifiedCode.planCode === 'BUSINESS' ? 3 : 5;
+  const baseMaxUsers = verifiedCode.planCode === 'STARTER' ? 2 : 5;
   return { normalizedKey, ...verifiedCode, planName, durationMonths, durationName, baseMaxFirms, baseMaxUsers };
 }
 
@@ -636,8 +636,8 @@ export async function activateSubscription(licenseKey: string, email?: string, a
 
 function baseLimitsForPlan(planCode: string | null | undefined) {
   const code = String(planCode || '').toUpperCase();
-  if (code === 'STARTER') return { firms: 1, users: 1 };
-  if (code === 'BUSINESS') return { firms: 2, users: 3 };
+  if (code === 'STARTER') return { firms: 1, users: 2 };
+  if (code === 'BUSINESS') return { firms: 2, users: 5 };
   if (code === 'PROFESSIONAL') return { firms: 3, users: 5 };
   return { firms: 0, users: 0 };
 }
