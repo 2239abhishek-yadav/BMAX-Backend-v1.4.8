@@ -28,7 +28,7 @@ app.use(cors({ origin: (origin, callback) => {
   if (!origin || allowedCorsOrigins.has(origin)) return callback(null, true);
   return callback(new Error('CORS origin not allowed'));
 } }));
-app.use(express.raw({ type: 'application/x-bmax-cloud-backup', limit: '100mb' }));
+app.use(express.raw({ type: 'application/x-bmax-cloud-backup', limit: Number.MAX_SAFE_INTEGER }));
 app.use(express.json({ limit: '30mb' }));
 app.use(express.urlencoded({ limit: '30mb', extended: true }));
 app.use(phoneGuard);
