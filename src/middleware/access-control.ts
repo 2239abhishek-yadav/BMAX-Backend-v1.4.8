@@ -5,6 +5,18 @@ import { getSubscriptionAccess } from '../lib/subscription';
 import { planTier, requiredTierForRoute } from '../lib/plan-entitlements';
 
 function getFirmId(req:Request){
+  // Express app-level middleware can run before nested router params are populated.
+  // Prefer explicit route params, then parse the original URL (including /api prefixes),
+  // and finally fall back to query/body/header context.
+  const params=req.params as any;
+  const param=params?.firmId || params?.id;
+  if(param)return String(param);
+  const rawPath=String(req.originalUrl || req.path || '').split('?')[0];
+  const normalized=rawPath.replace(/^\/api\/?/,'').replace(/^\/+|\/+$/g,'');
+  const pathParts=normalized.split('/').filter(Boolean);
+  if(pathParts[0]==='settings' && pathParts[1])return decodeURIComponent(pathParts[1]);
+  if(pathParts[0]==='firms' && pathParts[1] && pathParts[1]!=='recovery-workspace')
+    return decodeURIComponent(pathParts[1]);
   const q=(req.query as any)?.firmId;
   if(q)return String(q);
   if((req.body as any)?.firmId)return String((req.body as any).firmId);
@@ -93,7 +105,8 @@ export function accessControl(req:Request,res:Response,next:NextFunction){
     return next();
   }
 
-  const isMutation = actionFor(req.method) !== 'view';
+  const resolvedAction = req.method === 'POST' && /\/delete-challenge\/?$/.test(req.path) ? 'delete' : actionFor(req.method);
+  const isMutation = resolvedAction !== 'view';
   if (!subscription.allowed && isMutation && transactionModules.has(module)) {
     return res.status(402).json({
       error: subscription.reason || 'Your B-MAX trial/subscription does not allow new transaction entries.',
@@ -165,7 +178,7 @@ export function accessControl(req:Request,res:Response,next:NextFunction){
       code: 'FIRM_CONTEXT_REQUIRED',
     });
   }
-  const result=checkPermission(email,firmId,module,actionFor(req.method));
+  const result=checkPermission(email,firmId,module,resolvedAction);
   if(result.allowed)return next();
   return res.status(403).json({error:`Permission denied: ${actionFor(req.method)} access to ${module}`,code:'PERMISSION_DENIED'});
 }
