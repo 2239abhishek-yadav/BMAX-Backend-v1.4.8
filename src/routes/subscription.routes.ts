@@ -86,12 +86,15 @@ router.post('/register', async (req: Request, res: Response) => {
 });
 
 router.post('/login', async (req: Request, res: Response) => {
+  let stage = 'validate';
   try {
     const email = String(req.body?.email || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
     if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ success:false, error:'Please enter a valid email address.' });
     if (!password) return res.status(400).json({ success:false, error:'Password is required.' });
+    stage = 'hostinger_authentication';
     const account = await phpAccountRequest('login', { email, password });
+    stage = 'render_local_user_sync';
     const now = new Date().toISOString();
     const id = String(account.id || uuidv4());
     const name = String(account.name || email.split('@')[0]);
@@ -107,7 +110,17 @@ router.post('/login', async (req: Request, res: Response) => {
     }
     res.json({ success:true, data:{ ...account, localUser:user, subscription:account?.subscription || getLocalSubscriptionState() } });
   } catch (err: any) {
-    res.status(Number(err?.status || 503)).json({ success:false, error:err?.message || 'Sign-in failed. Check your email and password.' });
+    console.error('[B-MAX account login]', {
+      stage,
+      httpStatus: Number(err?.status || 503),
+      requestId: typeof err?.requestId === 'string' ? err.requestId : null,
+      error: String(err?.message || 'Sign-in failed').slice(0, 200),
+    });
+    res.status(Number(err?.status || 503)).json({
+      success:false,
+      error:err?.message || 'Sign-in failed. Check your email and password.',
+      ...(typeof err?.requestId === 'string' ? { requestId: err.requestId } : {}),
+    });
   }
 });
 

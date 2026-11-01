@@ -19,6 +19,7 @@ async function callHostinger(payload: Record<string, any>) {
   if (!response.ok || result?.success !== true) {
     const e: any = new Error(result?.error || `Hostinger backup API returned HTTP ${response.status}`);
     e.status = response.status >= 400 && response.status < 600 ? response.status : 502;
+    if (typeof result?.requestId === 'string') e.requestId = result.requestId;
     throw e;
   }
   return result.data;
@@ -34,6 +35,24 @@ function sessionDetails(req: Request) {
   return { accountSessionToken: token, email };
 }
 
+
+// Log failures from post-login company/backup calls. Previously these catches
+// returned PHP errors to the desktop without any Render log entry.
+function reportHostingerFailure(action: string, err: any, res: Response) {
+  const status = Number(err?.status || 502);
+  console.error('[B-MAX Hostinger account API]', {
+    action,
+    httpStatus: status,
+    requestId: typeof err?.requestId === 'string' ? err.requestId : null,
+    error: String(err?.message || 'Hostinger account API request failed').slice(0, 200),
+  });
+  return res.status(status >= 400 && status < 600 ? status : 502).json({
+    success: false,
+    error: err?.message || 'Hostinger account API request failed.',
+    ...(typeof err?.requestId === 'string' ? { requestId: err.requestId } : {}),
+  });
+}
+
 router.post('/upload', async (req: Request, res: Response) => {
   try {
     const session = sessionDetails(req);
@@ -45,17 +64,17 @@ router.post('/upload', async (req: Request, res: Response) => {
       backupBase64: req.body.toString('base64'),
     });
     return res.status(201).json({ success:true, data });
-  } catch (err:any) { return res.status(Number(err?.status || 502)).json({ success:false, error:err?.message || 'Cloud backup upload failed.' }); }
+  } catch (err:any) { return reportHostingerFailure('backup_upload', err, res); }
 });
 
 router.get('/companies', async (req: Request, res: Response) => {
   try { return res.json({ success:true, data: await callHostinger({ action:'company_list', ...sessionDetails(req) }) }); }
-  catch (err:any) { return res.status(Number(err?.status || 502)).json({ success:false, error:err?.message || 'Unable to list companies for this account.' }); }
+  catch (err:any) { return reportHostingerFailure('company_list', err, res); }
 });
 
 router.get('/list', async (req: Request, res: Response) => {
   try { return res.json({ success:true, data: await callHostinger({ action:'backup_list', ...sessionDetails(req) }) }); }
-  catch (err:any) { return res.status(Number(err?.status || 502)).json({ success:false, error:err?.message || 'Unable to list cloud backups.' }); }
+  catch (err:any) { return reportHostingerFailure('backup_list', err, res); }
 });
 
 router.get('/:backupId/download', async (req: Request, res: Response) => {
@@ -71,12 +90,12 @@ router.get('/:backupId/download', async (req: Request, res: Response) => {
     res.setHeader('Content-Disposition',`attachment; filename="BMAX-Cloud-Backup-${String(data.id || req.params.backupId)}.db"`);
     res.setHeader('X-BMAX-Backup-SHA256',String(data.sha256 || ''));
     return res.send(bytes);
-  } catch (err:any) { return res.status(Number(err?.status || 502)).json({ success:false, error:err?.message || 'Cloud backup download failed.' }); }
+  } catch (err:any) { return reportHostingerFailure('backup_download', err, res); }
 });
 
 router.delete('/:backupId', async (req: Request, res: Response) => {
   try { return res.json({ success:true, data: await callHostinger({ action:'backup_delete', ...sessionDetails(req), backupId:String(req.params.backupId || '') }) }); }
-  catch (err:any) { return res.status(Number(err?.status || 502)).json({ success:false, error:err?.message || 'Cloud backup delete failed.' }); }
+  catch (err:any) { return reportHostingerFailure('backup_delete', err, res); }
 });
 
 export default router;
