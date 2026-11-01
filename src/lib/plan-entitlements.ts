@@ -38,9 +38,9 @@ export const ADDON_RATES = {
 } as const;
 
 export const PLAN_LIMITS = {
-  Starter: { firms: 1, users: 1 },
-  Business: { firms: 2, users: 3 },
-  Professional: { firms: 3, users: 5 },
+  Starter: { firms: 1, users: 1, multipleStores: false },
+  Business: { firms: 2, users: 3, multipleStores: true },
+  Professional: { firms: 3, users: 5, multipleStores: true },
 } as const;
 
 export const PLAN_FEATURES = {
@@ -52,14 +52,14 @@ export const PLAN_FEATURES = {
     'Profit & Loss / Stock Reports', 'Report Center', 'Basic Data Backup',
     'Import Templates', 'GST Regular / Composition / No-GST',
     'Appearance / Theme Modes', 'Account & Logout', 'Help & Support',
-    'ESC Back / Cancel Safety',
+    'ESC Back / Cancel Safety', 'Main Store (1 included)',
   ],
   Business: [
     'Everything in Starter', 'Multiple Users & Administration', 'Role & Permissions',
     'POS / Fast Billing', 'POS Full Screen', 'Counter Sale', 'Hold / Resume Bills',
     'Multiple Payment Modes', 'Barcode Billing & Scanning', 'Barcode Templates',
     'Invoice Design & Templates', 'Advanced Inventory Controls', 'Batch & Expiry Management',
-    'Godowns / Store', 'Loyalty Points', 'Sales / Purchase Orders', 'Quotation',
+    'Multiple Stores / Godowns', 'Loyalty Points', 'Sales / Purchase Orders', 'Quotation',
     'Delivery Challan', 'Job Work In', 'Job Work Out', 'Advanced Reports & Analytics',
     'LAN / Device Sync', 'DataSync Details', 'Tally Export',
     'Export / Import Manager', 'AI Import & Item Mapping', 'Multiple Document Series',
@@ -79,7 +79,7 @@ const ROUTE_TIER: Record<string, PlanTier> = {
   // Business
   'counter-sales': 2,
   'batches': 2,
-  'godowns': 2,
+  // The Godowns page is available to all plans for the included Main Store.
   'barcodes': 2,
   'sync': 2,
   'ai-import': 2,

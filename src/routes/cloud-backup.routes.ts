@@ -25,14 +25,16 @@ async function callHostinger(payload: Record<string, any>) {
   return result.data;
 }
 
-function sessionDetails(req: Request) {
+function sessionDetails(req: Request, requireFirm = true) {
   const token = String(req.headers['x-bmax-account-session'] || '').trim();
   const email = String(req.headers['x-bmax-user-email'] || '').trim().toLowerCase();
-  if (!/^[a-f0-9]{64}$/.test(token) || !/^\S+@\S+\.\S+$/.test(email)) {
+  const firmId = String(req.headers['x-bmax-firm-id'] || '').trim();
+  const firmName = String(req.headers['x-bmax-firm-name'] || '').trim().slice(0,200);
+  if (!/^[a-f0-9]{64}$/.test(token) || !/^\S+@\S+\.\S+$/.test(email) || (requireFirm && !/^[a-zA-Z0-9._:-]{1,100}$/.test(firmId))) {
     const e: any = new Error('Please sign in to your B-MAX account again before using cloud backup.');
     e.status = 401; throw e;
   }
-  return { accountSessionToken: token, email };
+  return { accountSessionToken: token, email, firmId, firmName };
 }
 
 
@@ -61,6 +63,7 @@ router.post('/upload', async (req: Request, res: Response) => {
     const data = await callHostinger({
       action: 'backup_upload', ...session,
       deviceName: String(req.headers['x-bmax-device-name'] || 'B-MAX desktop').slice(0,120),
+      firmName: session.firmName,
       backupBase64: req.body.toString('base64'),
     });
     return res.status(201).json({ success:true, data });
@@ -68,7 +71,7 @@ router.post('/upload', async (req: Request, res: Response) => {
 });
 
 router.get('/companies', async (req: Request, res: Response) => {
-  try { return res.json({ success:true, data: await callHostinger({ action:'company_list', ...sessionDetails(req) }) }); }
+  try { return res.json({ success:true, data: await callHostinger({ action:'company_list', ...sessionDetails(req, false) }) }); }
   catch (err:any) { return reportHostingerFailure('company_list', err, res); }
 });
 
