@@ -153,7 +153,14 @@ router.put('/:id/opening-stock', (req: Request, res: Response) => {
     const oldOpening = Number(item.openingStock || 0);
     const delta = openingStock - oldOpening;
     const tx = db.transaction(() => {
-      db.prepare('UPDATE items SET openingStock=?, currentStock=COALESCE(currentStock,0)+?, updatedAt=? WHERE id=? AND firmId=?').run(openingStock, delta, new Date().toISOString(), req.params.id, firmId);
+      const now = new Date().toISOString();
+      db.prepare('UPDATE items SET openingStock=?, currentStock=COALESCE(currentStock,0)+?, updatedAt=? WHERE id=? AND firmId=?').run(openingStock, delta, now, req.params.id, firmId);
+      const store:any = db.prepare("SELECT id FROM godowns WHERE firmId=? AND COALESCE(isActive,1)=1 ORDER BY CASE WHEN LOWER(TRIM(name))='main store' THEN 0 ELSE 1 END, isDefault DESC, name ASC LIMIT 1").get(firmId);
+      if (store?.id && delta !== 0) {
+        const stock:any = db.prepare('SELECT id FROM inventory_stock WHERE firmId=? AND itemId=? AND godownId=? ORDER BY rowid LIMIT 1').get(firmId, req.params.id, store.id);
+        if (stock?.id) db.prepare('UPDATE inventory_stock SET quantity=COALESCE(quantity,0)+?,updatedAt=? WHERE id=?').run(delta, now, stock.id);
+        else if (delta > 0) db.prepare('INSERT INTO inventory_stock(id,firmId,itemId,godownId,quantity,updatedAt) VALUES(?,?,?,?,?,?)').run(uuidv4(), firmId, req.params.id, store.id, delta, now);
+      }
     });
     tx();
     res.json({ success:true, data: db.prepare('SELECT * FROM items WHERE id=?').get(req.params.id) });
@@ -188,13 +195,15 @@ router.post('/', (req: Request, res: Response) => {
       mrp = 0, salePrice = 0, salePriceTaxInclusive = 0,
       saleDiscount = 0, saleDiscountType = 'percentage',
       purchasePrice = 0, purchasePriceTaxInclusive = 0,
-      taxRate = '0', openingStock = 0, minStockLevel = 0,
+      taxRate = '0', openingStock: _requestedOpeningStock = 0, minStockLevel = 0,
       location, batchNumber, expiryDate, packing,
       enableBatchTracking = 0, enableSerialTracking = 0,
       isActive = 1, isFavorite = 0, allowNegativeStock = 0, decimalEnabled = 0
     } = req.body;
 
     if (!firmId || !name) return res.status(400).json({ error: 'firmId and name are required' });
+    // Opening stock is entered only through Opening Stock / Excel import, never Item Creation.
+    const openingStock = 0;
     const manufacturingEnabled = getVisibilitySettings(String(firmId)).manufacturing !== false;
     const effectiveItemRole = manufacturingEnabled && ['RAW_MATERIAL','FINISHED_GOOD'].includes(itemRole) ? itemRole : 'FINISHED_GOOD';
     const normalizedTaxRate = Number(String(taxRate ?? 0).replace('%','').trim() || 0);

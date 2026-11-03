@@ -117,14 +117,24 @@ router.post('/', (req: Request, res: Response) => {
   try {
     const {firmId,itemId,batchNumber=null,expiryMonth=null,expiryYear=null,expiryDate=null,mfgDate=null,packing=null,purchaseRate=0,mrp=0,sellingRate=0,markup=0,schemeBuyQty=0,schemeFreeQty=0,quantity=0,source=''}=req.body;
     if(!firmId||!itemId)return res.status(400).json({error:'firmId and itemId required'});
-    if (String(source).toLowerCase() !== 'purchase') return res.status(403).json({error:'New batches can only be created from Purchase. Select an existing batch in Sales.'});
+    const normalizedSource=String(source).toLowerCase();
+    if (!['purchase','opening_stock'].includes(normalizedSource)) return res.status(403).json({error:'New batches can only be created from Purchase or Opening Stock. Select an existing batch in Sales.'});
+    const item:any=db.prepare('SELECT id,firmId,enableBatchTracking,decimalEnabled FROM items WHERE id=? AND firmId=?').get(itemId,firmId);
+    if(!item)return res.status(404).json({error:'Item not found'});
+    const qty=Number(quantity)||0;
+    if(normalizedSource==='opening_stock' && (!Number.isFinite(qty)||qty<=0))return res.status(400).json({error:'Enter a valid batch quantity greater than 0'});
+    if(normalizedSource==='opening_stock'){
+      const setting:any=db.prepare("SELECT settingValue FROM firm_settings WHERE firmId=? AND settingType='inventory_global' AND settingKey='batchEnabled'").get(firmId);
+      if(String(setting?.settingValue).toLowerCase()!=='true')return res.status(403).json({error:'Enable Batch Tracking in Module Management before adding opening batches.'});
+    }
     const parsedExpiry=parseExpiryInput(expiryDate);
     const legacy=expiryFromLegacyDate(expiryDate);
     const em=normalizeExpiryMonth(expiryMonth) ?? parsedExpiry.month ?? legacy.month;
     const ey=normalizeExpiryYear(expiryYear) ?? parsedExpiry.year ?? legacy.year;
+    if(normalizedSource==='opening_stock' && ((em && (em<1||em>12)) || (!!em !== !!ey)))return res.status(400).json({error:'Enter both a valid Expiry Month and Expiry Year, or leave both blank'});
     const commercial = { schemeBuyQty: Math.max(0, Number(schemeBuyQty)||0), schemeFreeQty: Math.max(0, Number(schemeFreeQty)||0) };
     if ((commercial.schemeBuyQty > 0) !== (commercial.schemeFreeQty > 0)) return res.status(400).json({error:'Scheme Buy Qty and Free Qty must both be greater than 0, or both be 0'});
-    const canonicalExpiryDate = null; // Expiry is stored canonically as expiryMonth + expiryYear.
+    const canonicalExpiryDate = null;
     const rawMfg = String(mfgDate || '').trim();
     const mfgMatch = rawMfg.match(/^(\d{1,2})\s*[/.-]\s*(\d{4})$/);
     const mfgIsoMatch = rawMfg.match(/^(\d{4})-(\d{2})(?:-\d{2})?$/);
@@ -132,28 +142,39 @@ router.post('/', (req: Request, res: Response) => {
       : mfgIsoMatch ? `${mfgIsoMatch[2]}/${mfgIsoMatch[1]}` : (rawMfg || null);
     const mfgParts = canonicalMfgDate ? canonicalMfgDate.match(/^(\d{2})\/(\d{4})$/) : null;
     const nowLocal = new Date();
-    const todayLocal = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth()+1).padStart(2,'0')}-${String(nowLocal.getDate()).padStart(2,'0')}`;
-    const currentMonthLocal = todayLocal.slice(0,7);
-    // Historical/expired batches are valid inventory history. Expiry is only
-    // rejected when malformed or earlier than the manufacturing month; sales
-    // and reports decide how an already-expired batch may be used.
     if (mfgParts && (Number(mfgParts[2])*12+Number(mfgParts[1])) > (nowLocal.getFullYear()*12 + nowLocal.getMonth()+1))
       return res.status(400).json({error:'Manufacturing month/year cannot be after the current month'});
     if (mfgParts && em && ey && (Number(ey)*12+Number(em)) < (Number(mfgParts[2])*12+Number(mfgParts[1])))
       return res.status(400).json({error:'Expiry month/year cannot be before Manufacturing month/year'});
-    const legacyDate=canonicalExpiryDate;
     if((req.body.requireExpiry === true || String(req.body.requireExpiry).toLowerCase() === 'true') && (!em || !ey)) return res.status(400).json({error:'Expiry Month and Expiry Year are required for a batch'});
+    const normalizedBatchNumber=String(batchNumber||'').trim() || null;
+    if(normalizedSource==='opening_stock' && !normalizedBatchNumber)return res.status(400).json({error:'Batch Number is required'});
     const now=new Date().toISOString();
-    const existing=batchNumber ? db.prepare('SELECT * FROM inventory_batches WHERE firmId=? AND itemId=? AND batchNumber=?').get(firmId,itemId,batchNumber) as any : null;
-    if(existing){
-      db.prepare(`UPDATE inventory_batches SET expiryDate=?,expiryMonth=?,expiryYear=?,mfgDate=COALESCE(?,mfgDate),packing=COALESCE(?,packing),purchaseRate=?,mrp=?,sellingRate=?,markup=?,schemeBuyQty=?,schemeFreeQty=?,quantity=quantity+?,updatedAt=? WHERE id=?`)
-        .run(canonicalExpiryDate,em,ey,canonicalMfgDate,packing,Number(purchaseRate)||0,Number(mrp)||0,Number(sellingRate)||0,Number(markup)||0,commercial.schemeBuyQty,commercial.schemeFreeQty,Number(quantity)||0,now,existing.id);
-      const saved:any=db.prepare('SELECT * FROM inventory_batches WHERE id=?').get(existing.id); return res.json({success:true,data:{...saved,expiryDate:null,expiryDisplay:expiryDisplay(saved.expiryMonth,saved.expiryYear)}});
-    }
-    const id=uuidv4();
-    db.prepare(`INSERT INTO inventory_batches(id,firmId,itemId,batchNumber,expiryDate,expiryMonth,expiryYear,mfgDate,packing,purchaseRate,mrp,sellingRate,markup,schemeBuyQty,schemeFreeQty,quantity,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(id,firmId,itemId,batchNumber,canonicalExpiryDate,em,ey,canonicalMfgDate,packing,Number(purchaseRate)||0,Number(mrp)||0,Number(sellingRate)||0,Number(markup)||0,commercial.schemeBuyQty,commercial.schemeFreeQty,Number(quantity)||0,now,now);
-    const saved:any=db.prepare('SELECT * FROM inventory_batches WHERE id=?').get(id); res.status(201).json({success:true,data:{...saved,expiryDate:null,expiryDisplay:expiryDisplay(saved.expiryMonth,saved.expiryYear)}});
+    const saveBatch=db.transaction(()=>{
+      const existing:any=normalizedBatchNumber ? db.prepare('SELECT * FROM inventory_batches WHERE firmId=? AND itemId=? AND batchNumber=?').get(firmId,itemId,normalizedBatchNumber) : null;
+      let batchId:string;
+      if(existing){
+        batchId=existing.id;
+        db.prepare(`UPDATE inventory_batches SET expiryDate=?,expiryMonth=?,expiryYear=?,mfgDate=COALESCE(?,mfgDate),packing=COALESCE(?,packing),purchaseRate=?,mrp=?,sellingRate=?,markup=?,schemeBuyQty=?,schemeFreeQty=?,quantity=quantity+?,updatedAt=? WHERE id=?`)
+          .run(canonicalExpiryDate,em,ey,canonicalMfgDate,packing,Number(purchaseRate)||0,Number(mrp)||0,Number(sellingRate)||0,Number(markup)||0,commercial.schemeBuyQty,commercial.schemeFreeQty,qty,now,batchId);
+      } else {
+        batchId=uuidv4();
+        db.prepare(`INSERT INTO inventory_batches(id,firmId,itemId,batchNumber,expiryDate,expiryMonth,expiryYear,mfgDate,packing,purchaseRate,mrp,sellingRate,markup,schemeBuyQty,schemeFreeQty,quantity,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(batchId,firmId,itemId,normalizedBatchNumber,canonicalExpiryDate,em,ey,canonicalMfgDate,packing,Number(purchaseRate)||0,Number(mrp)||0,Number(sellingRate)||0,Number(markup)||0,commercial.schemeBuyQty,commercial.schemeFreeQty,qty,now,now);
+      }
+      if(normalizedSource==='opening_stock'){
+        db.prepare('UPDATE items SET openingStock=COALESCE(openingStock,0)+?,currentStock=COALESCE(currentStock,0)+?,updatedAt=? WHERE id=? AND firmId=?').run(qty,qty,now,itemId,firmId);
+        const store:any=db.prepare("SELECT id FROM godowns WHERE firmId=? AND COALESCE(isActive,1)=1 ORDER BY CASE WHEN LOWER(TRIM(name))='main store' THEN 0 ELSE 1 END, isDefault DESC, name ASC LIMIT 1").get(firmId);
+        if(store?.id){
+          const stock:any=db.prepare('SELECT id FROM inventory_stock WHERE firmId=? AND itemId=? AND godownId=? ORDER BY rowid LIMIT 1').get(firmId,itemId,store.id);
+          if(stock?.id)db.prepare('UPDATE inventory_stock SET quantity=COALESCE(quantity,0)+?,updatedAt=? WHERE id=?').run(qty,now,stock.id);
+          else db.prepare('INSERT INTO inventory_stock(id,firmId,itemId,godownId,quantity,updatedAt) VALUES(?,?,?,?,?,?)').run(uuidv4(),firmId,itemId,store.id,qty,now);
+        }
+      }
+      return db.prepare('SELECT * FROM inventory_batches WHERE id=?').get(batchId) as any;
+    });
+    const saved:any=saveBatch();
+    res.status(201).json({success:true,data:{...saved,expiryDate:null,expiryDisplay:expiryDisplay(saved.expiryMonth,saved.expiryYear)}});
   }catch(e:any){res.status(500).json({error:e.message})}
 });
 
