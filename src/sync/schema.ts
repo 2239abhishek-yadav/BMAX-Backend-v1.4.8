@@ -1,6 +1,6 @@
 import { getDeviceIdentity } from './device';
 
-const SYNC_TABLES = [
+export const SYNC_TABLES = [
   'firms','gst_registrations','firm_users','categories','units','items','groups','parties',
   'documents','document_items','payments','payment_allocations','bank_accounts','expenses',
   'godowns','inventory_stock','employees','attendance','payroll_runs','payroll_items',

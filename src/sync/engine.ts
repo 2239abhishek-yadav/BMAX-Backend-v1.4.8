@@ -1,10 +1,14 @@
 import { db } from '../lib/db';
 import { getDeviceIdentity } from './device';
 import { enqueuePendingChanges, getSyncStats } from './queue';
+import { SYNC_TABLES } from './schema';
+
+const ALLOWED_SYNC_TABLES = new Set<string>(SYNC_TABLES);
 
 const identity = getDeviceIdentity();
 
 function rowPayload(tableName: string, recordId: string) {
+  if (!ALLOWED_SYNC_TABLES.has(tableName)) throw new Error('Unsupported synchronization table.');
   const row = db.prepare(`SELECT * FROM ${tableName} WHERE id=?`).get(recordId) as any;
   return row || null;
 }
@@ -15,6 +19,26 @@ export function listChanges(sinceVersion=0, limit=500) {
 }
 
 function applyRemoteChange(change: any) {
+  // Never interpolate a peer-supplied SQL identifier. Remote/LAN change payloads
+  // must use the same explicit table allowlist as local change capture.
+  if (!change || typeof change !== 'object' || Array.isArray(change)) return { status:'rejected' };
+  if (typeof change.tableName !== 'string' || !ALLOWED_SYNC_TABLES.has(change.tableName)) return { status:'rejected' };
+  if (!['CREATE','UPDATE','DELETE'].includes(String(change.operation))) return { status:'rejected' };
+  if (typeof change.changeId !== 'string' || !change.changeId || change.changeId.length > 128) return { status:'rejected' };
+  if (typeof change.deviceId !== 'string' || !change.deviceId || change.deviceId.length > 128) return { status:'rejected' };
+  if (typeof change.recordId !== 'string' || !change.recordId || change.recordId.length > 256) return { status:'rejected' };
+  if (!Number.isSafeInteger(Number(change.version)) || Number(change.version) < 1) return { status:'rejected' };
+  if (typeof change.changedAt !== 'string' || !change.changedAt || change.changedAt.length > 64) return { status:'rejected' };
+  if (change.firmId != null && (typeof change.firmId !== 'string' || change.firmId.length > 100)) return { status:'rejected' };
+  if (change.operation === 'DELETE') {
+    if (change.payload != null) return { status:'rejected' };
+  } else {
+    if (!change.payload || typeof change.payload !== 'object' || Array.isArray(change.payload)) return { status:'rejected' };
+    if (String(change.payload.id || '') !== change.recordId) return { status:'rejected' };
+    if (change.payload.firmId != null && change.firmId != null && String(change.payload.firmId) !== String(change.firmId)) return { status:'rejected' };
+  }
+  if (change.tableName === 'firms' && String(change.firmId || '') !== change.recordId) return { status:'rejected' };
+
   const duplicate = db.prepare('SELECT 1 FROM sync_changes WHERE changeId=? LIMIT 1').get(change.changeId);
   if (duplicate) return { status:'ignored' };
   const now = new Date().toISOString();
@@ -64,13 +88,15 @@ function applyRemoteChange(change: any) {
 }
 
 export function importChanges(changes:any[]) {
-  let applied=0, conflicts=0;
+  let applied=0, conflicts=0, rejected=0;
   for (const change of changes) {
-    if (change.deviceId === identity.deviceId) continue;
+    if (change?.deviceId === identity.deviceId) continue;
     const result = applyRemoteChange(change);
-    if (result.status === 'applied') applied++; else if (result.status === 'conflict') conflicts++;
+    if (result.status === 'applied') applied++;
+    else if (result.status === 'conflict') conflicts++;
+    else if (result.status === 'rejected') rejected++;
   }
-  return { applied, conflicts };
+  return { applied, conflicts, rejected };
 }
 
 export function markChangesSynced(changeIds:string[]) {

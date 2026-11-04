@@ -62,6 +62,7 @@ router.post('/upload', async (req: Request, res: Response) => {
     if (req.body.subarray(0,16).toString('binary') !== 'SQLite format 3\u0000') return res.status(400).json({ success:false, error:'The selected file is not a valid SQLite database backup.' });
     const data = await callHostinger({
       action: 'backup_upload', ...session,
+      backupType: String(req.headers['x-bmax-cloud-sync'] || '') === '1' ? 'autosync' : 'manual',
       deviceName: String(req.headers['x-bmax-device-name'] || 'B-MAX desktop').slice(0,120),
       firmName: session.firmName,
       backupBase64: req.body.toString('base64'),

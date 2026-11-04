@@ -127,13 +127,14 @@ router.post('/login', async (req: Request, res: Response) => {
 router.post('/company-created', async (req: Request, res: Response) => {
   try {
     const email = String(req.body?.email || '').trim().toLowerCase();
+    const accountSessionToken = String(req.body?.accountSessionToken || '').trim();
     const firmId = String(req.body?.firmId || '').trim();
     const firmName = String(req.body?.firmName || '').trim();
-    if (!/^\S+@\S+\.\S+$/.test(email) || !firmId || !firmName) {
-      return res.status(400).json({ success:false, error:'Customer email, company ID and company name are required.' });
+    if (!/^\S+@\S+\.\S+$/.test(email) || !/^[a-f0-9]{64}$/i.test(accountSessionToken) || !/^[a-zA-Z0-9._:-]{1,100}$/.test(firmId) || !firmName || firmName.length > 200) {
+      return res.status(400).json({ success:false, error:'A valid signed-in account session, company ID and company name are required.' });
     }
     const data = await phpAccountRequest('company', {
-      email, firmId, firmName,
+      email, accountSessionToken, firmId, firmName,
       company: req.body?.company && typeof req.body.company === 'object' ? req.body.company : {},
     });
     return res.json({ success:true, data });

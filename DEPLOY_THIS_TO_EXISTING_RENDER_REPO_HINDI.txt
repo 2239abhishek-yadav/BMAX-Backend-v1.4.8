@@ -1,0 +1,21 @@
+B-MAX v1.4.10 Render backend deployment package
+
+This package contains the CONTENTS of deployment/render-backend at its root.
+
+If your existing Render service is connected to the main B-MAX repository and Root Directory is `deployment/render-backend`, copy/replace these files into that exact folder in the GitHub repository (preserve folder structure), commit and push.
+
+If your existing Render service is connected to a dedicated backend repository whose Root Directory is repository root, copy/replace these contents at that repository root.
+
+Do not create a second Render service or change the database/disk settings.
+
+Build Command: npm install && npm run build
+Start Command: npm start
+Node: 22.x or newer (project engine >=22)
+
+Required existing private Render environment variables:
+BMAX_PHP_ACCOUNT_API_URL=https://bmaxerp.com/API/bmax-account-api.php
+BMAX_PHP_ACCOUNT_API_TOKEN=<EXACT SAME VALUE as BMAX_API_TOKEN in Hostinger private config.php>
+
+Keep BMAX_USE_CENTRAL_LICENSE_SERVER and all existing environment variables unchanged unless intentionally configured. Do not commit secrets, .env, DB files or backups.
+
+After push, wait for deployment to finish. Check GET / returns status=running and version=1.4.10. Then inspect logs for Hostinger cloud-backup API errors.
