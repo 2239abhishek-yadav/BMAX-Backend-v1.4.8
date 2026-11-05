@@ -84,23 +84,40 @@ router.get('/', (req: Request, res: Response) => {
     const { firmId, type, categoryId, companyId, search, active } = req.query;
     if (!firmId) return res.status(400).json({ error: 'firmId required' });
 
+    // Keep the legacy unpaginated response for existing selectors and integrations.
+    // Item Master explicitly opts into pagination so a large catalog never creates
+    // tens of thousands of DOM rows or a huge IPC/JSON response in one request.
+    const paginated = req.query.page !== undefined || req.query.limit !== undefined;
+    const page = paginated ? Math.max(1, Math.floor(Number(req.query.page) || 1)) : 1;
+    const limit = paginated ? Math.min(200, Math.max(25, Math.floor(Number(req.query.limit) || 100))) : 0;
+    const offset = paginated ? (page - 1) * limit : 0;
+    const stockStatus = String(req.query.stockStatus || '').trim();
+
+    let where = ' WHERE i.firmId = ?';
+    const params: any[] = [firmId];
+    if (type) { where += ' AND i.type = ?'; params.push(type); }
+    if (categoryId) { where += ' AND i.categoryId = ?'; params.push(categoryId); }
+    if (companyId) { where += ' AND i.companyId = ?'; params.push(companyId); }
+    if (active !== undefined) { where += ' AND i.isActive = ?'; params.push(active === 'true' ? 1 : 0); }
+    if (search) { where += ' AND (i.name LIKE ? OR i.itemCode LIKE ? OR i.sku LIKE ? OR i.barcode LIKE ?)'; const term=`%${search}%`; params.push(term,term,term,term); }
+    if (stockStatus === 'in_stock') where += ' AND COALESCE(i.currentStock,0) > COALESCE(i.minStockLevel,0) AND COALESCE(i.currentStock,0) > 0';
+    else if (stockStatus === 'low_stock') where += ' AND COALESCE(i.currentStock,0) > 0 AND COALESCE(i.minStockLevel,0) > 0 AND COALESCE(i.currentStock,0) <= COALESCE(i.minStockLevel,0)';
+    else if (stockStatus === 'out_of_stock') where += ' AND COALESCE(i.currentStock,0) <= 0';
+
+    const total = paginated
+      ? Number((db.prepare(`SELECT COUNT(*) AS total FROM items i${where}`).get(...params) as any)?.total || 0)
+      : undefined;
     let query = `SELECT i.*, c.name as categoryName, u.name as unitName, u.shortName as unitShortName,
       su.name as secondaryUnitName, su.shortName as secondaryUnitShortName, ic.name as companyName
       FROM items i LEFT JOIN categories c ON i.categoryId = c.id
       LEFT JOIN units u ON i.unitId = u.id
       LEFT JOIN units su ON i.secondaryUnitId = su.id
-      LEFT JOIN item_companies ic ON i.companyId = ic.id
-      WHERE i.firmId = ?`;
-    const params: any[] = [firmId];
-
-    if (type) { query += ' AND i.type = ?'; params.push(type); }
-    if (categoryId) { query += ' AND i.categoryId = ?'; params.push(categoryId); }
-    if (companyId) { query += ' AND i.companyId = ?'; params.push(companyId); }
-    if (active !== undefined) { query += ' AND i.isActive = ?'; params.push(active === 'true' ? 1 : 0); }
-    if (search) { query += ' AND (i.name LIKE ? OR i.itemCode LIKE ? OR i.sku LIKE ? OR i.barcode LIKE ?)'; const term=`%${search}%`; params.push(term,term,term,term); }
-    query += ' ORDER BY i.name ASC';
-
-    const items = db.prepare(query).all(params);
+      LEFT JOIN item_companies ic ON i.companyId = ic.id${where}
+      ORDER BY i.name COLLATE NOCASE ASC, i.id ASC`;
+    const items = paginated
+      ? db.prepare(`${query} LIMIT ? OFFSET ?`).all(...params, limit, offset)
+      : db.prepare(query).all(...params);
+    if (paginated) return res.json({ success: true, data: items, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)), hasPrevious: page > 1, hasNext: offset + items.length < total } });
     res.json({ success: true, data: items });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -223,6 +240,16 @@ router.post('/', (req: Request, res: Response) => {
       const duplicateCode = db.prepare('SELECT id FROM items WHERE firmId=? AND LOWER(TRIM(itemCode))=LOWER(?) AND isActive=1 LIMIT 1').get(firmId, String(itemCode).trim()) as any;
       if (duplicateCode) return res.status(409).json({ error: 'Item code already exists. Use a different item code or enable Allow Duplicate Item Code in Item Settings.' });
     }
+    const allowDuplicateItems = getModuleSettings(String(firmId), 'items').allowDuplicateItems;
+    const normalizedBarcode = String(barcode || '').trim();
+    if (!allowDuplicateItems) {
+      const duplicateName = db.prepare("SELECT id FROM items WHERE firmId=? AND isActive=1 AND lower(trim(name))=lower(trim(?)) LIMIT 1").get(firmId, normalizedName) as any;
+      if (duplicateName) return res.status(409).json({ error: 'Item name already exists. Enable Allow Duplicate Items in Item Settings to create another item with the same name.' });
+    }
+    if (normalizedBarcode) {
+      const duplicateBarcode = db.prepare("SELECT id FROM items WHERE firmId=? AND lower(trim(COALESCE(barcode,'')))=lower(trim(?)) LIMIT 1").get(firmId, normalizedBarcode) as any;
+      if (duplicateBarcode) return res.status(409).json({ error: 'Barcode already exists. Every item must have a unique barcode; enter a different barcode.' });
+    }
 
     // Unit 2 (secondary/larger unit) is optional, but if provided it must have a
     // sensible conversion quantity into Unit 1 (base) — e.g. 1 Strip = 10 Tablets.
@@ -240,7 +267,7 @@ router.post('/', (req: Request, res: Response) => {
         enableBatchTracking, enableSerialTracking, isActive, isFavorite, allowNegativeStock, decimalEnabled,
         createdAt, updatedAt)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, firmId, name, type, effectiveItemRole, hsnCode, itemCode, sku || null, barcode || null, description, imageUrl,
+    `).run(id, firmId, name, type, effectiveItemRole, hsnCode, itemCode, sku || null, normalizedBarcode || null, description, imageUrl,
       categoryId, companyId, unitId, secondaryUnitId || null, convFactor,
       normalizedMrp, salePrice, salePriceTaxInclusive ? 1 : 0,
       saleDiscount, saleDiscountType, purchasePrice, purchasePriceTaxInclusive ? 1 : 0,
@@ -302,13 +329,23 @@ router.put('/:id', (req: Request, res: Response) => {
     const normalizedMrp = mrpSetting ? Number(mrp ?? 0) : existingMrp;
     if (!Number.isFinite(normalizedMrp) || normalizedMrp < 0) return res.status(400).json({ error: 'MRP cannot be negative' });
     const precisionItem = { name: normalizedName, decimalEnabled: decimalEnabled ? 1 : 0 };
-    const current:any = db.prepare('SELECT openingStock,minStockLevel FROM items WHERE id=? AND firmId=?').get(req.params.id, req.body.firmId);
+    const current:any = db.prepare('SELECT name,openingStock,minStockLevel FROM items WHERE id=? AND firmId=?').get(req.params.id, req.body.firmId);
     assertItemQuantityPrecision(precisionItem, current?.openingStock ?? 0, 'Opening stock');
     assertItemQuantityPrecision(precisionItem, minStockLevel ?? 0, 'Minimum stock level');
     const allowDuplicateCode = db.prepare("SELECT settingValue FROM firm_settings WHERE firmId=? AND settingType='items' AND settingKey='allowDuplicateItemCode'").get(req.body.firmId) as any;
     if (itemCode && String(allowDuplicateCode?.settingValue) !== 'true') {
       const duplicateCode = db.prepare('SELECT id FROM items WHERE firmId=? AND id<>? AND LOWER(TRIM(itemCode))=LOWER(?) AND isActive=1 LIMIT 1').get(req.body.firmId, req.params.id, String(itemCode).trim()) as any;
       if (duplicateCode) return res.status(409).json({ error: 'Item code already exists. Use a different item code or enable Allow Duplicate Item Code in Item Settings.' });
+    }
+    const allowDuplicateItems = getModuleSettings(String(req.body.firmId), 'items').allowDuplicateItems;
+    const normalizedBarcode = String(barcode || '').trim();
+    if (!allowDuplicateItems && String(current?.name || '').trim().toLowerCase() !== normalizedName.toLowerCase()) {
+      const duplicateName = db.prepare("SELECT id FROM items WHERE firmId=? AND id<>? AND isActive=1 AND lower(trim(name))=lower(trim(?)) LIMIT 1").get(req.body.firmId, req.params.id, normalizedName) as any;
+      if (duplicateName) return res.status(409).json({ error: 'Item name already exists. Enable Allow Duplicate Items in Item Settings to create another item with the same name.' });
+    }
+    if (normalizedBarcode) {
+      const duplicateBarcode = db.prepare("SELECT id FROM items WHERE firmId=? AND id<>? AND lower(trim(COALESCE(barcode,'')))=lower(trim(?)) LIMIT 1").get(req.body.firmId, req.params.id, normalizedBarcode) as any;
+      if (duplicateBarcode) return res.status(409).json({ error: 'Barcode already exists. Every item must have a unique barcode; enter a different barcode.' });
     }
 
     db.prepare(`
@@ -319,7 +356,7 @@ router.put('/:id', (req: Request, res: Response) => {
         minStockLevel=?, location=?, batchNumber=?, expiryDate=?, packing=?,
         enableBatchTracking=?, enableSerialTracking=?, isActive=?, isFavorite=?,
         allowNegativeStock=?, decimalEnabled=?, updatedAt=? WHERE id=?
-    `).run(name, type, effectiveItemRole, hsnCode, itemCode, sku, barcode, description, imageUrl,
+    `).run(name, type, effectiveItemRole, hsnCode, itemCode, sku, normalizedBarcode || null, description, imageUrl,
       categoryId, companyId, unitId, secondaryUnitId || null, convFactor,
       normalizedMrp, salePrice, salePriceTaxInclusive ? 1 : 0,
       saleDiscount, saleDiscountType, purchasePrice, purchasePriceTaxInclusive ? 1 : 0,

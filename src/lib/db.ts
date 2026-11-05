@@ -1006,7 +1006,10 @@ export function initializeDatabase() {
     if (!itemCols.includes('sku')) db.exec('ALTER TABLE items ADD COLUMN sku TEXT');
     if (!itemCols.includes('barcode')) db.exec('ALTER TABLE items ADD COLUMN barcode TEXT');
     db.exec("CREATE INDEX IF NOT EXISTS idx_items_search ON items(firmId, name, itemCode, sku, barcode)");
-    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_items_barcode_unique ON items(firmId, barcode) WHERE barcode IS NOT NULL AND TRIM(barcode) <> ''");
+    // Barcode is ALWAYS unique per firm; duplicate-item preference only controls item names.
+    try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_items_barcode_unique_normalized ON items(firmId, lower(trim(barcode))) WHERE barcode IS NOT NULL AND TRIM(barcode) <> '' "); }
+    catch (barcodeIndexError:any) { const conflicts=db.prepare("SELECT firmId, lower(trim(barcode)) AS barcodeKey, COUNT(*) AS duplicateCount, GROUP_CONCAT(id) AS itemIds FROM items WHERE barcode IS NOT NULL AND TRIM(barcode)<>'' GROUP BY firmId, lower(trim(barcode)) HAVING COUNT(*)>1 LIMIT 100").all(); console.error('[DB] Barcode uniqueness index could not be created. Existing duplicate barcodes require review:', barcodeIndexError?.message || barcodeIndexError, JSON.stringify(conflicts)); }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_items_barcode_lookup ON items(firmId, barcode) WHERE barcode IS NOT NULL AND TRIM(barcode) <> ''");
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_items_sku_unique ON items(firmId, sku) WHERE sku IS NOT NULL AND TRIM(sku) <> ''");
   } catch (e) { console.warn('[DB] item search migration:', (e as any).message); }
   try {

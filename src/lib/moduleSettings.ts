@@ -48,6 +48,7 @@ export interface ModuleSettings {
   sellingRateEnabled: boolean;
   allowNegativeStock: boolean;
   allowDuplicateItemCode: boolean;
+  allowDuplicateItems: boolean;
   gstPriceMode: 'exclusive' | 'inclusive';
   barcodeBillingEnabled: boolean;
   lastFiveTransactionsEnabled: boolean;
@@ -78,6 +79,7 @@ const FEATURE_DEFAULTS: ModuleSettings = {
   freeQuantityEnabled: true, mrpEnabled: true, sellingRateEnabled: true,
   allowNegativeStock: false,
   allowDuplicateItemCode: false,
+  allowDuplicateItems: false,
   gstPriceMode: 'exclusive',
   barcodeBillingEnabled: true,
   lastFiveTransactionsEnabled: true,
@@ -164,6 +166,7 @@ export function getModuleSettings(firmId: string, moduleKey: string): ModuleSett
     if (r.settingKey === 'mrpEnabled')           out.mrpEnabled           = r.settingValue === 'true';
     if (r.settingKey === 'sellingRateEnabled')   out.sellingRateEnabled   = r.settingValue === 'true';
     if (r.settingKey === 'allowDuplicateItemCode') out.allowDuplicateItemCode = r.settingValue === 'true';
+    if (r.settingKey === 'allowDuplicateItems') out.allowDuplicateItems = r.settingValue === 'true';
     if (r.settingKey === 'allowNegativeStock') out.allowNegativeStock = /^(true|1|yes|on)$/i.test(String(r.settingValue || '').trim());
     if (r.settingKey === 'gstPriceMode') out.gstPriceMode = r.settingValue === 'inclusive' ? 'inclusive' : 'exclusive';
     if (r.settingKey === 'barcodeBillingEnabled') out.barcodeBillingEnabled = r.settingValue === 'true';

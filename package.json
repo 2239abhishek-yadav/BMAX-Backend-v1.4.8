@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "dev:watch": "tsx watch src/server.ts",
-    "audit:zero": "npm audit --audit-level=high"
+    "audit:zero": "npm audit --audit-level=high",
+    "verify:cloud-backup-streaming": "node scripts/verify-cloud-backup-streaming.cjs"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",

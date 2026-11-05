@@ -183,7 +183,7 @@ router.post('/items/preview', upload.single('file'), (req: Request, res: Respons
     // Load lookup tables
     const units = db.prepare('SELECT id, shortName FROM units WHERE firmId = ?').all(firmId) as any[];
     const categories = db.prepare('SELECT id, name FROM categories WHERE firmId = ? AND type = ?').all(firmId, 'item') as any[];
-    const existingItems = db.prepare('SELECT name, itemCode FROM items WHERE firmId = ? AND isActive = 1').all(firmId) as any[];
+    const existingItems = db.prepare('SELECT name, itemCode, barcode FROM items WHERE firmId = ? AND isActive = 1').all(firmId) as any[];
 
     const unitMap: Record<string, string> = {};
     for (const u of units) unitMap[u.shortName.trim().toUpperCase()] = u.id;
@@ -194,6 +194,13 @@ router.post('/items/preview', upload.single('file'), (req: Request, res: Respons
     const existingCodes = new Set(existingItems.map((i: any) => (i.itemCode || '').trim().toLowerCase()).filter(Boolean));
     const allowDuplicateCodeRow = db.prepare("SELECT settingValue FROM firm_settings WHERE firmId=? AND settingType='items' AND settingKey='allowDuplicateItemCode'").get(firmId) as any;
     const allowDuplicateItemCode = String(allowDuplicateCodeRow?.settingValue) === 'true';
+    const allowDuplicateItems = getModuleSettings(String(firmId), 'items').allowDuplicateItems;
+    const existingBarcodeOwners = new Map<string, string>();
+    for (const item of existingItems) {
+      const key = cellStr(item.barcode).trim().toLowerCase();
+      if (key && !existingBarcodeOwners.has(key)) existingBarcodeOwners.set(key, cellStr(item.name).trim().toLowerCase());
+    }
+    const seenImportBarcodes = new Map<string, string>();
 
     const headers = (rows[0] || []).map((v: any) => cellStr(v).toLowerCase());
     // Backward compatibility: accept the previous B-MAX item template as well as the new one.
@@ -233,6 +240,16 @@ router.post('/items/preview', upload.single('file'), (req: Request, res: Respons
       if (!name) errs.push('Name is required');
       if (!['PRODUCT', 'SERVICE'].includes(type)) errs.push(`Type must be PRODUCT or SERVICE (got "${type}")`);
       if (itemCode && existingCodes.has(itemCode.toLowerCase()) && !allowDuplicateItemCode) errs.push(`Item code "${itemCode}" already exists`);
+      if (barcode) {
+        const key = barcode.trim().toLowerCase();
+        const itemName = name.trim().toLowerCase();
+        const existingOwner = existingBarcodeOwners.get(key);
+        const importedOwner = seenImportBarcodes.get(key);
+        const sameExistingItemWillBeReused = !allowDuplicateItems && existingOwner === itemName;
+        const sameImportedItemWillBeReused = !allowDuplicateItems && importedOwner === itemName;
+        if ((existingOwner && !sameExistingItemWillBeReused) || (importedOwner && !sameImportedItemWillBeReused)) errs.push(`Barcode "${barcode}" is already assigned. Every separate item must have a unique barcode.`);
+        if (!seenImportBarcodes.has(key)) seenImportBarcodes.set(key, itemName);
+      }
       if (salePrice < 0) errs.push('Selling Rate cannot be negative');
       if (mrp < 0) errs.push('MRP cannot be negative');
       for (const [label, value] of [['Discount %', saleDiscount], ['Discount 1 %', discount1], ['Volume Discount %', volumeDiscount]] as const) { if (value < 0 || value > 100) errs.push(`${label} must be between 0 and 100`); }
@@ -274,6 +291,8 @@ router.post('/items/commit', (req: Request, res: Response) => {
 
     const now = new Date().toISOString();
     let inserted = 0, updated = 0, skipped = 0;
+    const allowDuplicateItems = getModuleSettings(String(firmId), 'items').allowDuplicateItems;
+    const importBarcodeOwners = new Map<string, string>();
 
     const insertStmt = db.prepare(`
       INSERT INTO items (id, firmId, name, type, hsnCode, itemCode, sku, barcode, description,
@@ -301,9 +320,18 @@ router.post('/items/commit', (req: Request, res: Response) => {
         const decimalEnabled = d.decimalEnabled === true || d.decimalEnabled === 1 || String(d.decimalEnabled||'').toLowerCase() === 'yes' ? 1 : 0;
         assertItemQuantityPrecision({name:d.name,decimalEnabled}, d.openingStock ?? 0, 'Opening stock');
         assertItemQuantityPrecision({name:d.name,decimalEnabled}, d.minStockLevel ?? 0, 'Minimum stock level');
+        const existing = allowDuplicateItems ? null : db.prepare('SELECT id FROM items WHERE firmId = ? AND LOWER(TRIM(name)) = LOWER(TRIM(?)) AND isActive=1 LIMIT 1').get(firmId, d.name) as any;
+        const normalizedBarcode = cellStr(d.barcode).trim().toLowerCase();
+        if (normalizedBarcode) {
+          const duplicateBarcode = db.prepare("SELECT id FROM items WHERE firmId=? AND lower(trim(COALESCE(barcode,'')))=lower(trim(?)) LIMIT 1").get(firmId, normalizedBarcode) as any;
+          if (duplicateBarcode && String(duplicateBarcode.id) !== String(existing?.id || '')) throw new Error(`Barcode already assigned to another item: ${d.barcode}. Every item must have a unique barcode.`);
+          const priorName = importBarcodeOwners.get(normalizedBarcode);
+          const currentName = String(d.name || '').trim().toLowerCase();
+          if (priorName && (allowDuplicateItems || priorName !== currentName)) throw new Error(`Duplicate barcode in this Excel file: ${d.barcode}. Every separate item must have a unique barcode.`);
+          if (!priorName) importBarcodeOwners.set(normalizedBarcode, currentName);
+        }
         const masters = resolveOrCreateItemMasters(firmId, d, now);
         d.unitId = masters.unitId; d.secondaryUnitId = masters.secondaryUnitId; d.categoryId = masters.categoryId; d.companyId = masters.companyId;
-        const existing = db.prepare('SELECT id FROM items WHERE firmId = ? AND LOWER(name) = LOWER(?)').get(firmId, d.name) as any;
 
         if (existing) {
           if (!overwriteExisting) { skipped++; continue; }

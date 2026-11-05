@@ -28,7 +28,8 @@ app.use(cors({ origin: (origin, callback) => {
   if (!origin || allowedCorsOrigins.has(origin)) return callback(null, true);
   return callback(new Error('CORS origin not allowed'));
 } }));
-app.use(express.raw({ type: 'application/x-bmax-cloud-backup', limit: Number.MAX_SAFE_INTEGER }));
+// Cloud backup uploads are streamed directly to Hostinger by the dedicated route.
+// Do not install express.raw() here: buffering large SQLite files can exhaust Render heap.
 app.use(express.json({ limit: '30mb' }));
 app.use(express.urlencoded({ limit: '30mb', extended: true }));
 app.use(phoneGuard);

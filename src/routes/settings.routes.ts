@@ -190,13 +190,25 @@ function cleanTemplateDesign(input:any, formatId:string) {
       enabled: el.enabled !== false, fontSize:font, fontWeight:weight,
       align:TEMPLATE_ALIGN.includes(String(el.align)) ? String(el.align) : 'left',
       text:String(el.text || '').slice(0, 2000), z:Math.max(0,Math.min(999,Number(el.z)||10)),
-      settings: el.settings && typeof el.settings === 'object' ? JSON.parse(JSON.stringify(el.settings)).toString().length < 10000 ? el.settings : {} : {}
+      settings: (() => {
+        if (!el.settings || typeof el.settings !== 'object') return {};
+        const cloned = JSON.parse(JSON.stringify(el.settings));
+        // Keep bounded, safe image data used by signature fields. Firm logos are
+        // read from firms.logoUrl and are not duplicated into every template.
+        if (typeof cloned.src === 'string') {
+          const src = cloned.src;
+          const safeData = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/i.test(src) && src.length <= 260000;
+          const safeUrl = /^https:\/\//i.test(src) && src.length <= 2048;
+          if (!safeData && !safeUrl) delete cloned.src;
+        }
+        return JSON.stringify(cloned).length <= 270000 ? cloned : {};
+      })()
     };
   }) : [];
   const itemColumns:any = {};
-  for (const k of ['serial','item','hsn','batch','expiry','mrp','qty','unit','rate','discount','gst','amount']) itemColumns[k] = cols[k] !== false;
+  for (const k of ['serial','item','packing','hsn','batch','expiry','mrp','unit1','unit2','qty','freeQty','gst','discount1','discount2','netRate','amount']) itemColumns[k] = cols[k] !== false;
   const cleanLabels:any = {};
-  for (const k of ['item','hsn','batch','expiry','mrp','qty','unit','rate','discount','gst','amount']) cleanLabels[k] = String(labels[k] || k).slice(0,80);
+  for (const k of ['item','packing','hsn','batch','expiry','mrp','unit1','unit2','qty','freeQty','gst','discount1','discount2','netRate','amount']) cleanLabels[k] = String(labels[k] || k).slice(0,80);
   return {
     version:2, formatId,
     name:String(d.name || `${formatId} Template`).slice(0,120),
@@ -384,7 +396,7 @@ router.put('/:firmId/modules/:moduleKey', (req: Request, res: Response) => {
     const now = new Date().toISOString();
     const { firmId, moduleKey } = req.params;
     const { multiSeriesEnabled, unitsEnabled, itemDiscountEnabled, billDiscountEnabled,
-      packingEnabled, batchEnabled, expiryEnabled, mfgDateEnabled, freeQuantityEnabled, mrpEnabled, sellingRateEnabled, purchaseRateEnabled, discountPercentageEnabled, discountAmountEnabled, unit1Enabled, unit2Enabled, hsnEnabled, serialNumberEnabled, itemNameEnabled, barcodeEnabled, accessionCodeEnabled, netAmountEnabled, netRateEnabled, gstPercentageEnabled, printBarcodeAfterPurchase, allowDuplicateItemCode, allowNegativeStock, gstPriceMode, barcodeBillingEnabled, lastFiveTransactionsEnabled, notesDescriptionEnabled, transactionSidebarCollapsed } = req.body;
+      packingEnabled, batchEnabled, expiryEnabled, mfgDateEnabled, freeQuantityEnabled, mrpEnabled, sellingRateEnabled, purchaseRateEnabled, discountPercentageEnabled, discountAmountEnabled, unit1Enabled, unit2Enabled, hsnEnabled, serialNumberEnabled, itemNameEnabled, barcodeEnabled, accessionCodeEnabled, netAmountEnabled, netRateEnabled, gstPercentageEnabled, printBarcodeAfterPurchase, allowDuplicateItemCode, allowDuplicateItems, allowNegativeStock, gstPriceMode, barcodeBillingEnabled, lastFiveTransactionsEnabled, notesDescriptionEnabled, transactionSidebarCollapsed } = req.body;
 
     // Retire legacy quantity/purchase-unit selector settings. The canonical model is Unit 1 + Unit 2.
     db.prepare("DELETE FROM firm_settings WHERE firmId = ? AND settingType = ? AND settingKey IN ('quantity1Enabled','quantity2Enabled','purchaseUnitMode','purchaseRateUnit')").run(firmId, moduleKey);
@@ -416,6 +428,7 @@ router.put('/:firmId/modules/:moduleKey', (req: Request, res: Response) => {
     if (gstPercentageEnabled !== undefined) upsert('gstPercentageEnabled', !!gstPercentageEnabled);
     if (printBarcodeAfterPurchase !== undefined && moduleKey === 'purchase_invoice') upsert('printBarcodeAfterPurchase', !!printBarcodeAfterPurchase);
     if (allowDuplicateItemCode !== undefined && moduleKey === 'items') upsert('allowDuplicateItemCode', !!allowDuplicateItemCode);
+    if (allowDuplicateItems !== undefined && moduleKey === 'items') upsert('allowDuplicateItems', !!allowDuplicateItems);
     if (barcodeBillingEnabled !== undefined && ['sale_invoice','pos_billing','counter_sale','sale_order','sale_return','sale_return_challan','sale_quotation','sale_proforma','delivery_challan','job_work_out','purchase_invoice','purchase_order','purchase_challan','purchase_return','purchase_return_challan','job_work_in'].includes(moduleKey)) upsert('barcodeBillingEnabled', !!barcodeBillingEnabled);
     if (lastFiveTransactionsEnabled !== undefined) upsert('lastFiveTransactionsEnabled', !!lastFiveTransactionsEnabled);
     if (notesDescriptionEnabled !== undefined) upsert('notesDescriptionEnabled', !!notesDescriptionEnabled);
