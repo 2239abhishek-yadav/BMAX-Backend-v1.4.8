@@ -35,7 +35,9 @@ async function callHostinger(payload: Record<string, any>) {
 // heap allocations and caused Render's Node.js process to run out of memory.
 async function callHostingerBackupStream(req: Request, session: ReturnType<typeof sessionDetails>, backupType: string, deviceName: string) {
   const { endpoint, token } = hostingerEndpointAndToken();
-  const response = await fetch(endpoint, {
+  // Keep Node's streaming-fetch extension in the variable type rather than
+  // adding an unknown property to an inline DOM RequestInit object literal.
+  const streamRequestInit = {
     method: 'POST',
     headers: {
       'content-type': 'application/octet-stream',
@@ -48,11 +50,12 @@ async function callHostingerBackupStream(req: Request, session: ReturnType<typeo
       'x-bmax-device-name': deviceName,
       ...(req.headers['content-length'] ? { 'content-length': String(req.headers['content-length']) } : {}),
     },
-    // Node 22 fetch supports streaming AsyncIterable bodies with duplex='half'.
+    // Node 22 fetch requires duplex='half' when the request body is a stream.
     body: req as any,
-    duplex: 'half' as any,
+    duplex: 'half',
     signal: AbortSignal.timeout(300000),
-  });
+  } as RequestInit & { duplex: 'half' };
+  const response = await fetch(endpoint, streamRequestInit);
   const result: any = await response.json().catch(() => ({}));
   if (!response.ok || result?.success !== true) {
     const e: any = new Error(result?.error || `Hostinger backup API returned HTTP ${response.status}`);
