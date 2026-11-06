@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { Router, Request, Response } from 'express';
 
 const router = Router();
@@ -35,8 +36,6 @@ async function callHostinger(payload: Record<string, any>) {
 // heap allocations and caused Render's Node.js process to run out of memory.
 async function callHostingerBackupStream(req: Request, session: ReturnType<typeof sessionDetails>, backupType: string, deviceName: string) {
   const { endpoint, token } = hostingerEndpointAndToken();
-  // Keep Node's streaming-fetch extension in the variable type rather than
-  // adding an unknown property to an inline DOM RequestInit object literal.
   const streamRequestInit = {
     method: 'POST',
     headers: {
@@ -50,7 +49,7 @@ async function callHostingerBackupStream(req: Request, session: ReturnType<typeo
       'x-bmax-device-name': deviceName,
       ...(req.headers['content-length'] ? { 'content-length': String(req.headers['content-length']) } : {}),
     },
-    // Node 22 fetch requires duplex='half' when the request body is a stream.
+    // Node 22 fetch supports streaming AsyncIterable bodies with duplex='half'.
     body: req as any,
     duplex: 'half',
     signal: AbortSignal.timeout(300000),
@@ -132,17 +131,38 @@ router.get('/list', async (req: Request, res: Response) => {
 router.get('/:backupId/download', async (req: Request, res: Response) => {
   try {
     const session = sessionDetails(req);
-    const data:any = await callHostinger({ action:'backup_download', ...session, backupId:String(req.params.backupId || '') });
-    const bytes = Buffer.from(String(data.backupBase64 || ''), 'base64');
-    if (bytes.length < 100 || bytes.subarray(0,16).toString('binary') !== 'SQLite format 3\u0000') {
-      return res.status(502).json({ success:false, error:'Hostinger returned an invalid backup payload.' });
+    const backupId = String(req.params.backupId || '');
+    if (!/^[a-f0-9]{32}$/.test(backupId)) return res.status(400).json({ success:false, error:'Valid backup ID is required.' });
+    const { endpoint, token } = hostingerEndpointAndToken();
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type':'application/json', 'x-bmax-api-token':token, 'x-bmax-backup-download-stream':'1' },
+      body: JSON.stringify({ action:'backup_download', accountSessionToken:session.accountSessionToken, email:session.email, firmId:session.firmId, backupId }),
+      signal: AbortSignal.timeout(300000),
+    });
+    if (!response.ok) {
+      const detail:any = await response.json().catch(()=>({}));
+      const err:any = new Error(detail?.error || `Hostinger backup download returned HTTP ${response.status}`);
+      err.status = response.status;
+      if (typeof detail?.requestId === 'string') err.requestId = detail.requestId;
+      throw err;
     }
+    if (!response.body || !String(response.headers.get('content-type')||'').includes('application/vnd.sqlite3')) {
+      throw new Error('Hostinger returned an invalid backup download response.');
+    }
+    const size = Number(response.headers.get('content-length') || 0);
+    if (size && size < 100) throw new Error('Downloaded company backup is too small to be a valid SQLite database.');
+    res.status(200);
     res.setHeader('Content-Type','application/vnd.sqlite3');
-    res.setHeader('Content-Length',String(bytes.length));
-    res.setHeader('Content-Disposition',`attachment; filename="BMAX-Cloud-Backup-${String(data.id || req.params.backupId)}.db"`);
-    res.setHeader('X-BMAX-Backup-SHA256',String(data.sha256 || ''));
-    return res.send(bytes);
-  } catch (err:any) { return reportHostingerFailure('backup_download', err, res); }
+    if (size) res.setHeader('Content-Length',String(size));
+    res.setHeader('Content-Disposition',`attachment; filename=\"BMAX-Cloud-Backup-${backupId}.db\"`);
+    res.setHeader('X-BMAX-Backup-SHA256',String(response.headers.get('x-bmax-backup-sha256')||''));
+    res.setHeader('X-BMAX-Backup-ID',backupId);
+    Readable.fromWeb(response.body as any).pipe(res);
+  } catch (err:any) {
+    if (!res.headersSent) return reportHostingerFailure('backup_download', err, res);
+    res.destroy(err);
+  }
 });
 
 router.delete('/:backupId', async (req: Request, res: Response) => {
