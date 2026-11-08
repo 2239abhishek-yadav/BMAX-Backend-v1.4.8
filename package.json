@@ -1,6 +1,6 @@
 {
   "name": "bmax-backend",
-  "version": "1.4.10",
+  "version": "1.4.11",
   "description": "B-MAX Backend Server",
   "main": "dist/server.js",
   "scripts": {

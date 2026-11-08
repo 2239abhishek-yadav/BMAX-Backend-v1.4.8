@@ -165,7 +165,7 @@ router.post('/:firmId/ai/item-mapping', (req: Request, res: Response) => {
 // Server is the source of truth for saved invoice/document layouts.  The
 // frontend only edits the JSON schema below; the API validates the schema
 // before it is stored so an arbitrary object cannot become a print template.
-const TEMPLATE_FORMAT_IDS = ['thermal_3','thermal_4','a4','a4_half','a5','a5_half','batch_a4','colorful_a4'];
+const TEMPLATE_FORMAT_IDS = ['thermal_3','thermal_4','a4','a4_half','a5','a5_half','batch_a4','colorful_a4','tally_classic'];
 const TEMPLATE_TYPES = ['sale_invoice','pos_billing','sale_order','sale_quotation','sale_proforma','delivery_challan','sale_return','sale_return_challan','credit_note','job_work_out','purchase_invoice','purchase_order','purchase_challan','purchase_return','purchase_return_challan','debit_note','job_work_in','receipt_voucher','payment_voucher'];
 const TEMPLATE_ELEMENT_TYPES = ['text','logo','company_field','document_title','document_meta','party','address','item_table','totals','amount_words','bank_details','upi_qr','upi_id','signature','terms','footer','payment_details','bill_adjustment','mode_details','narration','party_balance'];
 const TEMPLATE_ALIGN = ['left','center','right'];
