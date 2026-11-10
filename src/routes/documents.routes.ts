@@ -1007,6 +1007,36 @@ router.post('/convert-pending-to-invoice', (req: Request, res: Response) => {
       if(!selectedBySource.size) throw new Error('Select at least one pending item and quantity');
       // Undo only the source stock reservation for selected quantities. Remaining source
       // quantities stay reserved and remain visible as pending.
+      // Allocate only advances received against each exact source order. These
+      // receipts are linked to the source document, so generic invoice creation
+      // cannot consume them against an unrelated invoice for the same customer.
+      let sourceAdvanceApplied = 0;
+      const addSourceAdvanceAllocation = db.prepare('INSERT INTO payment_allocations (id,firmId,paymentId,documentId,amount,createdAt) VALUES (?,?,?,?,?,?)');
+      let invoiceAdvanceRemaining = Math.max(0, Number(total)||0);
+      for (const src of sources) {
+        if (invoiceAdvanceRemaining <= 0.004 || !src.partyId || !selectedBySource.has(String(src.id))) continue;
+        const sourceAdvances = db.prepare(`
+          SELECT p.id,p.amount,COALESCE(a.allocated,0) AS allocated
+          FROM payments p
+          LEFT JOIN (SELECT paymentId,SUM(amount) AS allocated FROM payment_allocations GROUP BY paymentId) a ON a.paymentId=p.id
+          WHERE p.firmId=? AND p.partyId=? AND p.type='payment_in' AND COALESCE(p.isDeleted,0)=0
+            AND (p.linkedDocumentId=? OR p.reference LIKE ?)
+          ORDER BY p.paymentDate,p.createdAt
+        `).all(firmId, src.partyId, src.id, `BMAX_QUOTE_ADVANCE:${src.id}:%`) as any[];
+        for (const advance of sourceAdvances) {
+          if (invoiceAdvanceRemaining <= 0.004) break;
+          const available = Math.max(0, Number(advance.amount||0)-Number(advance.allocated||0));
+          const take = Math.min(available, invoiceAdvanceRemaining);
+          if (take <= 0.004) continue;
+          addSourceAdvanceAllocation.run(uuidv4(), firmId, advance.id, id, +take.toFixed(2), now);
+          sourceAdvanceApplied = +(sourceAdvanceApplied + take).toFixed(2);
+          invoiceAdvanceRemaining = +(invoiceAdvanceRemaining - take).toFixed(2);
+        }
+      }
+      if (sourceAdvanceApplied > 0) {
+        db.prepare('UPDATE documents SET paidAmount=?,balanceAmount=? WHERE id=? AND firmId=?')
+          .run(sourceAdvanceApplied, Math.max(0, Number(total||0)-sourceAdvanceApplied), id, firmId);
+      }
       for(const src of sources){
         const srcItems=db.prepare('SELECT * FROM document_items WHERE documentId=?').all(src.id) as any[];
         let remaining=0;
@@ -1058,6 +1088,31 @@ router.post('/convert-proforma-to-invoice', (req: Request, res: Response) => {
         const v:any={id:uuidv4(),documentId:id,firmId,itemId:item.itemId,name:item.name,description:item.description,hsnCode:item.hsnCode,quantity:item.quantity||0,unit:item.unit,unitId:resolved.unitId,isSecondaryUnit:resolved.isSecondaryUnit,baseQuantity:resolved.baseQuantity,secondaryQuantity:item.secondaryQuantity||0,secondaryUnitId:item.secondaryUnitId||null,priceUnitId:item.priceUnitId||null,price:item.price||0,discount:item.discount||0,discountType:item.discountType||'amount',discountPercentage:item.discountPercentage||0,discountAmount:item.discountAmount||0,taxRate:item.taxRate||0,taxAmount:item.taxAmount||0,amount:item.amount||0,batchId:batchDetailsAllowedForUpdate ? (item.batchId||null) : null,batchNumber:batchDetailsAllowedForUpdate ? (item.batchNumber||null) : null,expiryDate:null,expiryMonth:batchDetailsAllowedForUpdate ? lineExpiry(item).month : null,expiryYear:batchDetailsAllowedForUpdate ? lineExpiry(item).year : null,mfgDate:batchDetailsAllowedForUpdate ? (item.mfgDate||null) : null,packing:item.packing||null,freeQuantity:item.freeQuantity||0,mrp:item.mrp||0,sellingRate:item.sellingRate||0,markup:item.markup||0,createdAt:now,updatedAt:now};
         const cs=Object.keys(v).filter(k=>icols.has(k)); db.prepare(`INSERT INTO document_items (${cs.join(',')}) VALUES (${cs.map(()=>'?').join(',')})`).run(...cs.map(k=>v[k]));
         if(item.itemId && resolved.baseQuantity>0){ const qty=Number(resolved.baseQuantity); if(item.batchId) db.prepare('UPDATE inventory_batches SET quantity=quantity-?,updatedAt=? WHERE id=? AND firmId=?').run(qty,now,item.batchId,firmId); db.prepare('UPDATE items SET currentStock=currentStock-?,updatedAt=? WHERE id=?').run(qty,now,item.itemId); }
+      }
+      // Carry only advances explicitly received against this exact proforma into
+      // the converted invoice. The receipt/cash movement already exists; create
+      // allocations only, never a second payment or cash/bank movement.
+      const sourceAdvanceRows = db.prepare(`
+        SELECT p.id,p.amount,COALESCE(a.allocated,0) AS allocated
+        FROM payments p LEFT JOIN (SELECT paymentId,SUM(amount) AS allocated FROM payment_allocations GROUP BY paymentId) a ON a.paymentId=p.id
+        WHERE p.firmId=? AND p.partyId=? AND p.type='payment_in' AND p.reference LIKE ? AND COALESCE(p.isDeleted,0)=0
+        ORDER BY p.paymentDate,p.createdAt
+      `).all(firmId,source.partyId,`BMAX_QUOTE_ADVANCE:${sourceId}:%`) as any[];
+      let invoiceRemaining=Math.max(0,Number(source.total||0));
+      const insertAdvanceAllocation=db.prepare('INSERT INTO payment_allocations (id,firmId,paymentId,documentId,amount,createdAt) VALUES (?,?,?,?,?,?)');
+      let sourceAdvanceApplied=0;
+      for(const adv of sourceAdvanceRows){
+        if(invoiceRemaining<=0.004) break;
+        const free=Math.max(0,Number(adv.amount||0)-Number(adv.allocated||0));
+        const take=Math.min(free,invoiceRemaining);
+        if(take<=0.004) continue;
+        insertAdvanceAllocation.run(uuidv4(),firmId,adv.id,id,+take.toFixed(2),now);
+        sourceAdvanceApplied=+(sourceAdvanceApplied+take).toFixed(2);
+        invoiceRemaining=+(invoiceRemaining-take).toFixed(2);
+      }
+      if(sourceAdvanceApplied>0){
+        db.prepare('UPDATE documents SET paidAmount=?,balanceAmount=? WHERE id=? AND firmId=?')
+          .run(sourceAdvanceApplied,Math.max(0,Number(source.total||0)-sourceAdvanceApplied),id,firmId);
       }
       db.prepare("UPDATE documents SET status='completed',updatedAt=? WHERE id=? AND firmId=?").run(now,sourceId,firmId);
       recalcDocumentStatus(id,now);
@@ -1152,8 +1207,15 @@ router.put('/:id' , (req: Request, res: Response) => {
       if (Number.isFinite(d.getTime())) { d.setDate(d.getDate()+days); resolvedUpdateDueDate = d.toISOString().slice(0,10); }
     }
     if (resolvedUpdateDueDate && resolvedUpdateDocumentDate && resolvedUpdateDueDate < resolvedUpdateDocumentDate) throw new Error('Due date cannot be before transaction date');
-    const normalizedPaidAmount = isInvoiceDocument ? updateRequestedPaidForType : (isAccountingDocument ? (parseFloat(String(paidAmount)) || 0) : 0);
-    const normalizedBalanceAmount = isInvoiceDocument ? Math.max(0, (parseFloat(String(total)) || 0) - normalizedPaidAmount) : (isAccountingDocument ? (parseFloat(String(balanceAmount)) || 0) : 0);
+    const isAdvanceTrackedSource = ['sale_quotation','sale_order'].includes(String(oldDoc?.documentType||''));
+    const linkedSourceAdvance = isAdvanceTrackedSource
+      ? Number((db.prepare(`SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE firmId=? AND partyId=? AND type='payment_in' AND reference LIKE ? AND COALESCE(isDeleted,0)=0`).get(oldDoc.firmId, oldDoc.partyId, `BMAX_QUOTE_ADVANCE:${oldDoc.id}:%`) as any)?.total || 0)
+      : 0;
+    if (isAdvanceTrackedSource && linkedSourceAdvance > 0.004 && String(normalizedUpdatePartyId||'') !== String(oldDoc.partyId||'')) {
+      throw new Error('Customer cannot be changed after an advance has been received against this quotation/order. Refund or reconcile the advance first.');
+    }
+    const normalizedPaidAmount = isInvoiceDocument ? updateRequestedPaidForType : (isAdvanceTrackedSource ? Math.min(updateTotalForType, linkedSourceAdvance) : (isAccountingDocument ? (parseFloat(String(paidAmount)) || 0) : 0));
+    const normalizedBalanceAmount = isInvoiceDocument || isAdvanceTrackedSource ? Math.max(0, updateTotalForType - normalizedPaidAmount) : (isAccountingDocument ? (parseFloat(String(balanceAmount)) || 0) : 0);
 
     // Customer credit-limit guard on modification. Exclude the current invoice from the existing balance.
     if (oldDoc?.documentType === 'sale_invoice' && normalizedUpdateTransactionType === 'credit' && normalizedUpdatePartyId && !(req.body as any).counterSaleIds?.length) {
@@ -1486,6 +1548,75 @@ router.delete('/:id', (req: Request, res: Response) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Receive an advance against a saved sales quotation/order. This is a real
+// receipt (cash/bank movement) but is intentionally NOT allocated to a bill
+// until the source document is converted into a Sales Invoice.
+router.post('/:id/advance', (req: Request, res: Response) => {
+  try {
+    const fail = (statusCode:number, message:string) => Object.assign(new Error(message), { statusCode });
+    const firmId = String(req.body?.firmId || '').trim();
+    const requestKey = String(req.body?.requestKey || '').trim();
+    const rows = Array.isArray(req.body?.paymentBreakdown) ? req.body.paymentBreakdown : [];
+    if (!firmId || !/^[A-Za-z0-9_-]{8,128}$/.test(requestKey) || !rows.length) {
+      return res.status(400).json({ error: 'firmId, a valid requestKey and paymentBreakdown are required' });
+    }
+    const clean = rows.map((r:any)=>({
+      method:String(r?.method||'cash'),
+      amount:Math.max(0,Number(r?.amount)||0),
+      bankId:r?.method==='bank'?(r?.bankId||req.body?.bankId||null):null
+    })).filter((r:any)=>r.amount>0.004);
+    const amount = +clean.reduce((n:number,r:any)=>n+r.amount,0).toFixed(2);
+    if (!amount) return res.status(400).json({ error: 'Advance amount must be greater than zero' });
+
+    const now = new Date().toISOString();
+    // Validate idempotency, current source balance and posting together inside
+    // one SQLite write transaction. This prevents simultaneous requests from
+    // both reading the same remaining balance and over-receiving the advance.
+    const result:any = db.transaction(() => {
+      const source:any = db.prepare('SELECT * FROM documents WHERE id=? AND firmId=? AND isDeleted=0').get(req.params.id, firmId);
+      if (!source) throw fail(404, 'Quotation / Sales Order not found');
+      if (!['sale_quotation','sale_order'].includes(String(source.documentType))) throw fail(400, 'Advance can only be received against a Sales Quotation or Sales Order');
+      if (!source.partyId) throw fail(400, 'Select a registered customer before receiving an advance');
+      if (['cancelled','completed','closed'].includes(String(source.status||'').toLowerCase())) throw fail(409, 'This quotation/order is already closed');
+
+      const prior = db.prepare('SELECT id FROM payments WHERE firmId=? AND partyId=? AND reference LIKE ? AND COALESCE(isDeleted,0)=0')
+        .all(firmId, source.partyId, `BMAX_QUOTE_ADVANCE:${source.id}:${requestKey}:%`) as any[];
+      if (prior.length) {
+        const payments = prior.map((x:any)=>db.prepare('SELECT * FROM payments WHERE id=?').get(x.id));
+        const current:any = db.prepare('SELECT paidAmount,balanceAmount,total FROM documents WHERE id=? AND firmId=?').get(source.id,firmId);
+        return { payments, current, idempotent: true };
+      }
+
+      const already = db.prepare(`SELECT id,amount FROM payments WHERE firmId=? AND partyId=? AND COALESCE(isDeleted,0)=0
+        AND (linkedDocumentId=? OR reference LIKE ?)`)
+        .all(firmId, source.partyId, source.id, `BMAX_QUOTE_ADVANCE:${source.id}:%`) as any[];
+      const received = already.reduce((n:number,p:any)=>n+Number(p.amount||0),0);
+      const available = Math.max(0, Number(source.total||0)-received);
+      if (amount > available + 0.004) throw fail(400, `Advance exceeds remaining quotation/order amount. Remaining: ₹${available.toFixed(2)}`);
+
+      const insert = db.prepare(`INSERT INTO payments (id,firmId,type,partyId,partyName,amount,paymentMethod,bankId,receiptNumber,paymentDate,reference,description,linkedDocumentId,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      const payments:any[] = [];
+      clean.forEach((r:any,i:number)=>{
+        const id=uuidv4();
+        const reference=`BMAX_QUOTE_ADVANCE:${source.id}:${requestKey}:${i}`;
+        insert.run(id,firmId,'payment_in',source.partyId,source.partyName,r.amount,r.method,r.bankId,null,
+          String(req.body?.paymentDate||source.documentDate||now.slice(0,10)),reference,
+          `Advance received against ${source.documentType==='sale_order'?'Sales Order':'Quotation'} ${source.documentNumber||source.id}`,
+          source.id,now,now);
+        applyFunds(firmId,r.method,r.bankId,r.amount,1,now);
+        payments.push(db.prepare('SELECT * FROM payments WHERE id=?').get(id));
+      });
+      const newPaid=+(received+amount).toFixed(2);
+      db.prepare('UPDATE documents SET paidAmount=?,balanceAmount=?,updatedAt=? WHERE id=? AND firmId=?')
+        .run(newPaid,Math.max(0,Number(source.total||0)-newPaid),now,source.id,firmId);
+      const current:any = db.prepare('SELECT paidAmount,balanceAmount,total FROM documents WHERE id=? AND firmId=?').get(source.id,firmId);
+      return { payments, current, idempotent: false };
+    })();
+
+    res.status(201).json({success:true,data:{payments:result.payments,paidAmount:Number(result.current?.paidAmount||0),balanceAmount:Number(result.current?.balanceAmount||0),total:Number(result.current?.total||0),idempotent:!!result.idempotent}});
+  } catch(err:any) { res.status(Number(err?.statusCode)||500).json({error:err.message}); }
 });
 
 export default router;

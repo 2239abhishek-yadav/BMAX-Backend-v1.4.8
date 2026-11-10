@@ -79,9 +79,40 @@ router.get('/leads/:firmId',(req,res)=>{
     res.json({rows});
   } catch(e:any) { res.status(500).json({error:e?.message||'Unable to load leads'}); }
 });
+router.get('/leads/:firmId/:id/timeline',(req,res)=>{
+  try {
+    const lead=db.prepare('SELECT id,firmId,name,phone,email,company,source,inquiry,productInterest,quotedAmount,pitch,stage,priority,nextFollowUp,notes,createdAt,updatedAt FROM crm_leads WHERE id=? AND firmId=?').get(req.params.id,req.params.firmId);
+    if(!lead) return res.status(404).json({error:'Lead not found in the selected company'});
+    const activities=db.prepare('SELECT * FROM crm_lead_activities WHERE leadId=? AND firmId=? ORDER BY datetime(createdAt) DESC,rowid DESC LIMIT 250').all(req.params.id,req.params.firmId);
+    res.json({lead,activities});
+  } catch(e:any) { res.status(500).json({error:e?.message||'Unable to load lead history'}); }
+});
+router.post('/leads/:firmId/:id/activities',(req,res)=>{
+  try {
+    const firmId=String(req.params.firmId), leadId=String(req.params.id), b=req.body||{};
+    const lead:any=db.prepare('SELECT id FROM crm_leads WHERE id=? AND firmId=?').get(leadId,firmId);
+    if(!lead) return res.status(404).json({error:'Lead not found in the selected company'});
+    const allowed=new Set(['follow_up','call','meeting','quotation','note','email','stage_change']);
+    const activityType=String(b.activityType||'note');
+    if(!allowed.has(activityType)) return res.status(400).json({error:'Invalid lead activity type'});
+    const subject=String(b.subject||'').trim();
+    if(!subject) return res.status(400).json({error:'Activity title is required'});
+    const amount=Number(b.amount||0);
+    if(!Number.isFinite(amount)||amount<0) return res.status(400).json({error:'Enter a valid non-negative amount'});
+    const id=uid('leadact'), now=nowIso();
+    db.prepare(`INSERT INTO crm_lead_activities (id,firmId,leadId,activityType,subject,details,amount,status,dueAt,completedAt,referenceNumber,createdBy,createdAt)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id,firmId,leadId,activityType,subject,String(b.details||''),amount,String(b.status||''),b.dueAt||null,b.completedAt||null,String(b.referenceNumber||''),String(req.headers['x-bmax-user-email']||''),now);
+    if(activityType==='follow_up' && b.dueAt) db.prepare('UPDATE crm_leads SET nextFollowUp=?,updatedAt=? WHERE id=? AND firmId=?').run(String(b.dueAt),now,leadId,firmId);
+    if(activityType==='quotation' && amount>0) db.prepare('UPDATE crm_leads SET quotedAmount=?,updatedAt=? WHERE id=? AND firmId=?').run(amount,now,leadId,firmId);
+    const saved=db.prepare('SELECT * FROM crm_lead_activities WHERE id=? AND firmId=?').get(id,firmId);
+    res.status(201).json({ok:true,activity:saved});
+  } catch(e:any) { res.status(500).json({error:e?.message||'Unable to save lead activity'}); }
+});
 router.post('/leads/:firmId',(req,res)=>{
   try {
     const b=req.body||{}, now=nowIso(), id=String(b.id||uid('lead'));
+    const previous:any=db.prepare('SELECT id,stage FROM crm_leads WHERE id=? AND firmId=?').get(id,req.params.firmId);
+    const existed=!!previous;
     const name=String(b.name||'').trim();
     if(!name) return res.status(400).json({error:'Lead name is required'});
     const phoneCheck=validateMobile(b.phone);
@@ -95,6 +126,15 @@ router.post('/leads/:firmId',(req,res)=>{
     db.prepare(`INSERT INTO crm_leads (id,firmId,name,phone,email,company,source,inquiry,productInterest,quotedAmount,pitch,stage,priority,nextFollowUp,ownerUserId,notes,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,phone=excluded.phone,email=excluded.email,company=excluded.company,source=excluded.source,inquiry=excluded.inquiry,productInterest=excluded.productInterest,quotedAmount=excluded.quotedAmount,pitch=excluded.pitch,stage=excluded.stage,priority=excluded.priority,nextFollowUp=excluded.nextFollowUp,ownerUserId=excluded.ownerUserId,notes=excluded.notes,updatedAt=excluded.updatedAt`).run(
       id,req.params.firmId,name,phone,String(b.email||'').trim(),String(b.company||'').trim(),String(b.source||'Walk-in'),String(b.inquiry||''),String(b.productInterest||''),quotedAmount,String(b.pitch||''),stage,priority,b.nextFollowUp||null,b.ownerUserId||null,String(b.notes||''),b.createdAt||now,now
     );
+    if(!existed){
+      db.prepare(`INSERT INTO crm_lead_activities (id,firmId,leadId,activityType,subject,details,amount,createdAt) VALUES (?,?,?,?,?,?,?,?)`)
+        .run(uid('leadact'),req.params.firmId,id,'note','Lead created',String(b.inquiry||b.notes||'Lead captured'),0,now);
+      if(quotedAmount>0) db.prepare(`INSERT INTO crm_lead_activities (id,firmId,leadId,activityType,subject,details,amount,createdAt) VALUES (?,?,?,?,?,?,?,?)`)
+        .run(uid('leadact'),req.params.firmId,id,'quotation','Initial quotation / quoted amount',String(b.pitch||'Amount captured with lead'),quotedAmount,now);
+    } else if(String(previous?.stage||'')!==stage){
+      db.prepare(`INSERT INTO crm_lead_activities (id,firmId,leadId,activityType,subject,details,amount,createdAt) VALUES (?,?,?,?,?,?,?,?)`)
+        .run(uid('leadact'),req.params.firmId,id,'stage_change',`Stage changed: ${previous?.stage||'New'} → ${stage}`,String(b.notes||''),0,now);
+    }
     const saved=db.prepare('SELECT * FROM crm_leads WHERE id=? AND firmId=?').get(id,req.params.firmId);
     res.json({ok:true,id,lead:saved});
   } catch(e:any) { res.status(500).json({error:e?.message||'Unable to save lead'}); }

@@ -40,6 +40,16 @@ export function ensureCrmSchema(){
       FOREIGN KEY(firmId) REFERENCES firms(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_crm_leads_firm_stage ON crm_leads(firmId, stage);
+    CREATE TABLE IF NOT EXISTS crm_lead_activities (
+      id TEXT PRIMARY KEY, firmId TEXT NOT NULL, leadId TEXT NOT NULL,
+      activityType TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', details TEXT,
+      amount REAL DEFAULT 0, status TEXT DEFAULT '', dueAt TEXT, completedAt TEXT,
+      referenceNumber TEXT, createdBy TEXT, createdAt TEXT NOT NULL,
+      FOREIGN KEY(firmId) REFERENCES firms(id) ON DELETE CASCADE,
+      FOREIGN KEY(leadId) REFERENCES crm_leads(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_crm_lead_activities_timeline
+      ON crm_lead_activities(firmId, leadId, createdAt DESC);
     CREATE TABLE IF NOT EXISTS crm_approval_rules (
       id TEXT PRIMARY KEY, firmId TEXT NOT NULL, name TEXT NOT NULL, moduleKey TEXT NOT NULL,
       minAmount REAL DEFAULT 0, maxAmount REAL, role TEXT NOT NULL, sequenceNo INTEGER DEFAULT 1,

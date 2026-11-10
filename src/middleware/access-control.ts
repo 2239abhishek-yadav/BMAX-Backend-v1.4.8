@@ -17,6 +17,10 @@ function getFirmId(req:Request){
   if(pathParts[0]==='settings' && pathParts[1])return decodeURIComponent(pathParts[1]);
   if(pathParts[0]==='firms' && pathParts[1] && pathParts[1]!=='recovery-workspace')
     return decodeURIComponent(pathParts[1]);
+  // CRM endpoints are mounted behind app-level accessControl, before Express
+  // populates nested-router params. Their firm id is the third path segment:
+  // /api/crm/leads/:firmId and /api/crm/loyalty/:firmId/...
+  if(pathParts[0]==='crm' && pathParts[2]) return decodeURIComponent(pathParts[2]);
   const q=(req.query as any)?.firmId;
   if(q)return String(q);
   if((req.body as any)?.firmId)return String((req.body as any).firmId);
@@ -38,7 +42,7 @@ function moduleFor(path:string, body:any){
     if (normalized.includes('/manufacturing/entries')) return 'manufacturing';
     return 'items';
   }
-  const map:any={items:'items',parties:'parties',documents:'sale_invoice',payments:'payment_in',bank:'bank','bank-accounts':'bank','bank-transactions':'bank_transactions',reports:'report_pl',hr:'employees',categories:'items',units:'items',agents:'parties',godowns:'items',expenses:'expenses','expense-ledgers':'expenses',series:'settings',import:'items','gst-registrations':'report_gst',users:'settings',batches:'items','counter-sales':'counter_sale','job-work':'job_work','stock-transfers':'stock_transfer',crm:'parties',settings:'settings',firms:'settings'};
+  const map:any={items:'items',parties:'parties',documents:'sale_invoice',payments:'payment_in',bank:'bank','bank-accounts':'bank','bank-transactions':'bank_transactions',reports:'report_pl',hr:'employees',categories:'items',units:'items',agents:'parties',godowns:'items',expenses:'expenses','expense-ledgers':'expenses',series:'settings',import:'items','gst-registrations':'report_gst',users:'settings',batches:'items','counter-sales':'counter_sale','job-work':'job_work','stock-transfers':'stock_transfer',crm:'parties',projects:'projects',reminders:'reminders',settings:'settings',firms:'settings'};
   if(p==='documents' && body?.documentType){
     const d=String(body.documentType); if(d.includes('purchase'))return 'purchase_invoice'; if(d.includes('return'))return 'sale_return'; if(d.includes('order'))return 'sale_order'; if(d.includes('quotation'))return 'sale_quotation'; if(d.includes('challan'))return 'delivery_challan'; if(d.includes('payment_in'))return 'payment_in'; if(d.includes('payment_out'))return 'payment_out';
   }
@@ -46,9 +50,15 @@ function moduleFor(path:string, body:any){
 }
 export function accessControl(req:Request,res:Response,next:NextFunction){
   if(req.path.startsWith('/uploads') || req.path.startsWith('/api/subscription')) return next();
+  // The recovery-workspace endpoint performs its own stronger authorization by
+  // validating the signed-in account session against Render's central company
+  // directory before it can create/repair an owner membership. Do not block this
+  // bootstrap repair behind the very local role permission it is designed to fix.
+  if(req.method==='POST' && req.path.replace(/^\/api\/?/,'').replace(/\/$/,'')==='firms/recovery-workspace') return next();
   const email=String(req.headers['x-bmax-user-email']||'').trim().toLowerCase();
   const firmId=getFirmId(req);
   const module=moduleFor(req.path,req.body);
+  if(req.method==='GET' && (/^\/api\/import\/(items|parties)\/template$/.test(req.path) || req.path==='/api/bank-transactions/import-template')) return next();
 
   // Subscription expiry is intentionally TRANSACTION-ONLY. This check must
   // run even when the desktop request does not carry optional user/firm headers;
@@ -118,12 +128,11 @@ export function accessControl(req:Request,res:Response,next:NextFunction){
     });
   }
 
-  // Company profiles are unlimited, but transaction rights are limited to the
-  // first N companies associated with the signed-in account, where N is the
-  // centrally activated plan's maxFirms (Starter=1, Business=3, Professional=10).
-  // Older/primary companies remain first; extra companies open read-only for
-  // transactions. The subscription expiry gate above still blocks all transaction
-  // mutations when the trial/license is expired or revoked.
+  // Firm creation is separately capped by maxFirms in firms.routes.ts. This
+  // transaction gate remains as defence in depth for already-existing firms
+  // beyond the licensed count (for example, firms created under an older plan).
+  // The subscription expiry gate above still blocks transaction mutations when
+  // the trial/license is expired or revoked.
   if (isMutation && transactionModules.has(module) && String(subscription.state?.status || '').toLowerCase() === 'active') {
     if (!email || !firmId) {
       return res.status(403).json({
