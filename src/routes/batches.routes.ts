@@ -54,8 +54,12 @@ router.get('/report', (req: Request, res: Response) => {
 
 router.get('/:id/transactions', (req: Request, res: Response) => {
   try {
-    const b=db.prepare('SELECT b.*,i.name itemName FROM inventory_batches b JOIN items i ON i.id=b.itemId WHERE b.id=?').get(req.params.id) as any;
-    if(!b)return res.status(404).json({error:'Batch not found'});
+    // Batch history is company-scoped. The desktop client must send the currently
+    // selected firmId; never infer access from a batch id alone.
+    const requestedFirmId = String(req.query.firmId || req.headers['x-bmax-firm-id'] || '').trim();
+    if (!requestedFirmId) return res.status(400).json({ error: 'firmId required for batch history' });
+    const b=db.prepare('SELECT b.*,i.name itemName FROM inventory_batches b JOIN items i ON i.id=b.itemId WHERE b.id=? AND b.firmId=?').get(req.params.id, requestedFirmId) as any;
+    if(!b)return res.status(404).json({error:'Batch not found in the selected company'});
     const documentRows:any[] = db.prepare(`SELECT di.id,d.id documentId,d.documentType,d.documentNumber,d.documentDate,d.partyName,d.partyType,
       di.quantity,di.freeQuantity,di.price,di.amount,di.taxAmount,di.batchNumber,di.expiryMonth,di.expiryYear,di.expiryDate,di.mfgDate,
       CASE WHEN d.documentType IN ('purchase_invoice','purchase_order','purchase_challan') THEN 'PURCHASE'
