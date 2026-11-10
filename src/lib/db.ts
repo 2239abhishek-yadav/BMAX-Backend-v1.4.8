@@ -3,12 +3,20 @@ import path from 'path';
 import fs from 'fs';
 import { initializeSyncSchema } from '../sync/schema';
 import { snapshotOpenDatabase } from '../backup/database-backup';
+import { applyPendingDatabaseRestore } from '../backup/database-restore';
 import { v4 as uuidv4 } from 'uuid';
 
 const DB_DIR = process.env.DB_PATH || path.join(process.cwd(), 'data');
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
 
 const DB_PATH = path.join(DB_DIR, 'bmax.db');
+try {
+  const restore = applyPendingDatabaseRestore(DB_PATH);
+  if (restore.applied) console.log('[DB] Pending backup restore applied; pre-restore copy retained in backups.');
+} catch (e:any) {
+  console.error('[DB] Pending restore rejected; existing database was not replaced:', e?.message || e);
+  throw e;
+}
 console.log('[DB] Database at:', DB_PATH);
 
 export const db = new Database(DB_PATH);
@@ -163,6 +171,7 @@ export function initializeDatabase() {
       type TEXT CHECK(type IN ('PRODUCT', 'SERVICE')) NOT NULL DEFAULT 'PRODUCT',
       hsnCode TEXT,
       itemCode TEXT,
+      accessionCode TEXT,
       sku TEXT,
       barcode TEXT,
       description TEXT,
@@ -171,6 +180,7 @@ export function initializeDatabase() {
       unitId TEXT,
       secondaryUnitId TEXT,
       conversionFactor REAL NOT NULL DEFAULT 1,
+      priceUnitId TEXT,
       salePrice REAL NOT NULL DEFAULT 0,
       salePriceTaxInclusive INTEGER DEFAULT 0,
       saleDiscount REAL DEFAULT 0,
@@ -320,6 +330,7 @@ export function initializeDatabase() {
       baseQuantity REAL NOT NULL DEFAULT 0,
       secondaryQuantity REAL NOT NULL DEFAULT 0,
       secondaryUnitId TEXT,
+      priceUnitId TEXT,
       price REAL NOT NULL DEFAULT 0,
       discount REAL DEFAULT 0,
       discountType TEXT DEFAULT 'percentage',
@@ -876,6 +887,10 @@ export function initializeDatabase() {
       db.exec('ALTER TABLE items ADD COLUMN conversionFactor REAL NOT NULL DEFAULT 1');
       console.log('[DB] Migrated: added items.conversionFactor');
     }
+    if (!itemCols.includes('priceUnitId')) {
+      db.exec('ALTER TABLE items ADD COLUMN priceUnitId TEXT');
+      console.log('[DB] Migrated: added items.priceUnitId (NULL safely means legacy Unit 1)');
+    }
   } catch (e) {
     console.warn('[DB] items unit-conversion migration skipped:', (e as any).message);
   }
@@ -884,6 +899,10 @@ export function initializeDatabase() {
     if (!diCols.includes('unitId')) {
       db.exec('ALTER TABLE document_items ADD COLUMN unitId TEXT');
       console.log('[DB] Migrated: added document_items.unitId');
+    }
+    if (!diCols.includes('priceUnitId')) {
+      db.exec('ALTER TABLE document_items ADD COLUMN priceUnitId TEXT');
+      console.log('[DB] Migrated: added document_items.priceUnitId');
     }
     if (!diCols.includes('isSecondaryUnit')) {
       db.exec('ALTER TABLE document_items ADD COLUMN isSecondaryUnit INTEGER DEFAULT 0');
@@ -999,6 +1018,9 @@ export function initializeDatabase() {
     db.exec('CREATE INDEX IF NOT EXISTS idx_items_company ON items(firmId, companyId)');
   } catch (e) { console.warn('[DB] item-company migration skipped:', e); }
 
+  // Additive migration for the optional accession number used in billing rows.
+  try { const cols=(db.prepare("PRAGMA table_info(items)").all() as any[]).map(c=>c.name); if(!cols.includes('accessionCode')) db.exec('ALTER TABLE items ADD COLUMN accessionCode TEXT'); } catch(e) { console.warn('[DB] items.accessionCode migration skipped:',e); }
+
   // Search/identity migration: SKU + barcode and separate B2B/B2C party identities.
   try {
     const itemCols = (db.prepare("PRAGMA table_info(items)").all() as any[]).map(c => c.name);
@@ -1006,9 +1028,17 @@ export function initializeDatabase() {
     if (!itemCols.includes('sku')) db.exec('ALTER TABLE items ADD COLUMN sku TEXT');
     if (!itemCols.includes('barcode')) db.exec('ALTER TABLE items ADD COLUMN barcode TEXT');
     db.exec("CREATE INDEX IF NOT EXISTS idx_items_search ON items(firmId, name, itemCode, sku, barcode)");
-    // Barcode is ALWAYS unique per firm; duplicate-item preference only controls item names.
-    try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_items_barcode_unique_normalized ON items(firmId, lower(trim(barcode))) WHERE barcode IS NOT NULL AND TRIM(barcode) <> '' "); }
-    catch (barcodeIndexError:any) { const conflicts=db.prepare("SELECT firmId, lower(trim(barcode)) AS barcodeKey, COUNT(*) AS duplicateCount, GROUP_CONCAT(id) AS itemIds FROM items WHERE barcode IS NOT NULL AND TRIM(barcode)<>'' GROUP BY firmId, lower(trim(barcode)) HAVING COUNT(*)>1 LIMIT 100").all(); console.error('[DB] Barcode uniqueness index could not be created. Existing duplicate barcodes require review:', barcodeIndexError?.message || barcodeIndexError, JSON.stringify(conflicts)); }
+    // Barcode is ALWAYS unique per firm, independent of the Allow Duplicate Items setting.
+    // The setting controls item-name duplicates only. Keep a normalized unique index so
+    // whitespace/case variants cannot silently create the same barcode twice.
+    try {
+      db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_items_barcode_unique_normalized ON items(firmId, lower(trim(barcode))) WHERE barcode IS NOT NULL AND TRIM(barcode) <> '' ");
+    } catch (barcodeIndexError:any) {
+      // Never delete or rewrite existing items automatically. API validation below still
+      // rejects every new duplicate; log the exact pre-existing conflicts for safe review.
+      const barcodeConflicts = db.prepare("SELECT firmId, lower(trim(barcode)) AS barcodeKey, COUNT(*) AS duplicateCount, GROUP_CONCAT(id) AS itemIds FROM items WHERE barcode IS NOT NULL AND TRIM(barcode)<>'' GROUP BY firmId, lower(trim(barcode)) HAVING COUNT(*)>1 LIMIT 100").all();
+      console.error('[DB] Barcode uniqueness index could not be created. Existing duplicate barcodes require review:', barcodeIndexError?.message || barcodeIndexError, JSON.stringify(barcodeConflicts));
+    }
     db.exec("CREATE INDEX IF NOT EXISTS idx_items_barcode_lookup ON items(firmId, barcode) WHERE barcode IS NOT NULL AND TRIM(barcode) <> ''");
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_items_sku_unique ON items(firmId, sku) WHERE sku IS NOT NULL AND TRIM(sku) <> ''");
   } catch (e) { console.warn('[DB] item search migration:', (e as any).message); }

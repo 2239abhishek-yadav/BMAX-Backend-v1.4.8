@@ -26,7 +26,7 @@ const ensureRoundOffColumn=()=>{
       id TEXT PRIMARY KEY, counterSaleId TEXT NOT NULL, firmId TEXT NOT NULL, itemId TEXT,
       name TEXT NOT NULL, quantity REAL NOT NULL DEFAULT 1, unit TEXT, unitId TEXT,
       isSecondaryUnit INTEGER DEFAULT 0, baseQuantity REAL NOT NULL DEFAULT 0,
-      secondaryQuantity REAL NOT NULL DEFAULT 0, secondaryUnitId TEXT, price REAL NOT NULL DEFAULT 0,
+      secondaryQuantity REAL NOT NULL DEFAULT 0, secondaryUnitId TEXT, priceUnitId TEXT, price REAL NOT NULL DEFAULT 0,
       taxRate REAL DEFAULT 0, taxAmount REAL DEFAULT 0, amount REAL NOT NULL DEFAULT 0,
       batchId TEXT, batchNumber TEXT, expiryDate TEXT, expiryMonth INTEGER, expiryYear INTEGER, mfgDate TEXT, packing TEXT, mrp REAL DEFAULT 0,
       godownId TEXT,
@@ -40,8 +40,14 @@ const ensureRoundOffColumn=()=>{
   const hadStockReserved=saleCols.some(c=>c.name==='stockReserved');
   if(!hadStockReserved) db.exec('ALTER TABLE counter_sales ADD COLUMN stockReserved INTEGER NOT NULL DEFAULT 0');
   if(!saleCols.some(c=>c.name==='stockReservedAt')) db.exec('ALTER TABLE counter_sales ADD COLUMN stockReservedAt TEXT');
-  const itemCols=db.prepare('PRAGMA table_info(counter_sale_items)').all() as any[];
+  let itemCols=db.prepare('PRAGMA table_info(counter_sale_items)').all() as any[];
   if(!itemCols.some(c=>c.name==='godownId')) db.exec('ALTER TABLE counter_sale_items ADD COLUMN godownId TEXT');
+  if(!itemCols.some(c=>c.name==='priceUnitId')) db.exec('ALTER TABLE counter_sale_items ADD COLUMN priceUnitId TEXT');
+  // Counter Sale rate/discount editing must work on both fresh and upgraded databases.
+  // Older builds omitted these columns even though the PATCH route already used them.
+  if(!itemCols.some(c=>c.name==='discountPercentage')) db.exec('ALTER TABLE counter_sale_items ADD COLUMN discountPercentage REAL NOT NULL DEFAULT 0');
+  if(!itemCols.some(c=>c.name==='discountAmount')) db.exec('ALTER TABLE counter_sale_items ADD COLUMN discountAmount REAL NOT NULL DEFAULT 0');
+  db.exec('UPDATE counter_sale_items SET discountAmount=ROUND(price*quantity*discountPercentage/100,2) WHERE COALESCE(discountAmount,0)=0 AND COALESCE(discountPercentage,0)>0');
   // Do not mark existing open rows as reserved merely because the column is new.
   // Some older releases created the queue row before reserving stock, so falsely
   // setting this flag causes Billing handoff to reject an actually-unreserved row.
@@ -83,16 +89,21 @@ const resolveBaseQty = (firmId:string,item:any,line:any) => {
   if(!getModuleSettings(firmId,'sale_invoice').unitsEnabled || !item) return q1;
   return +(q1 + (item.secondaryUnitId && q2 ? q2*(Number(item.conversionFactor)||1) : 0)).toFixed(4);
 };
-const calculateLine = (price:number, quantity:number, discountPercentage:number, taxRate:number) => {
+const calculateLine = (price:number, quantity:number, discountPercentage:number, taxRate:number, discountAmountOverride?:number) => {
   const p=Math.max(0,Number(price)||0);
   const q=Math.max(0,Number(quantity)||0);
   const d=Math.max(0,Math.min(100,Number(discountPercentage)||0));
   const rate=Math.max(0,Number(taxRate)||0);
   const gross=+(p*q).toFixed(2);
-  const discount=+(gross*d/100).toFixed(2);
-  const amount=+(gross-discount).toFixed(2);
+  const discount=discountAmountOverride===undefined
+    ? +(gross*d/100).toFixed(2)
+    : +Number(discountAmountOverride).toFixed(2);
+  if(!Number.isFinite(discount)||discount<0||discount>gross+0.0001) throw new Error('Discount amount must be between zero and the gross amount');
+  const safeDiscount=Math.min(gross,discount);
+  const amount=+(gross-safeDiscount).toFixed(2);
   const taxAmount=+(amount*rate/100).toFixed(2);
-  return {gross,discount,amount,taxAmount,total:+(amount+taxAmount).toFixed(2),discountPercentage:d,taxRate:rate};
+  const effectiveDiscountPercentage=gross>0?+(safeDiscount/gross*100).toFixed(4):0;
+  return {gross,discount:safeDiscount,amount,taxAmount,total:+(amount+taxAmount).toFixed(2),discountPercentage:effectiveDiscountPercentage,taxRate:rate};
 };
 
 router.get('/', (req:Request,res:Response)=>{
@@ -126,11 +137,12 @@ router.post('/', (req:Request,res:Response)=>{
         assertDocumentItemQuantities(item, line);
         const baseQuantity=resolveBaseQty(firmId,item,line);
         if(baseQuantity<=0) throw new Error(`Quantity must be greater than zero for ${item.name}`);
+        const priceUnitId=String(line.priceUnitId||item.priceUnitId||item.unitId||'');
         if(!isNegativeStockAllowed(firmId) && Number(item.currentStock||0)-baseQuantity < -0.0001) throw new Error(`Insufficient stock for ${item.name}. Available: ${Number(item.currentStock||0)}, Required: ${baseQuantity}`);
         const price=Number(line.price ?? item.salePrice)||0;
         const taxRate=Number(line.taxRate ?? item.taxRate)||0;
         if(![0,5,18].includes(taxRate)) throw new Error('GST rate must be one of 0%, 5% or 18%');
-        const calc=calculateLine(price,Number(line.quantity)||0,Number(line.discountPercentage)||0,taxRate);
+        const calc=calculateLine(price,baseQuantity,Number(line.discountPercentage)||0,taxRate,line.discountAmount===undefined?undefined:Number(line.discountAmount));
         const amount=calc.amount;
         const batchId=line.batchId||null, batchNo=line.batchNumber?String(line.batchNumber).trim():null;
         let batch:any=null;
@@ -145,13 +157,13 @@ router.post('/', (req:Request,res:Response)=>{
         if(batch && !isNegativeStockAllowed(firmId) && Number(batch.quantity||0)-stockRequired < -0.0001) throw new Error(`Insufficient batch stock for ${item.name} / ${batch.batchNumber||batchNo||''}. Required: ${stockRequired}`);
         if(!isNegativeStockAllowed(firmId) && Number(item.currentStock||0)-stockRequired < -0.0001) throw new Error(`Insufficient stock for ${item.name}. Available: ${Number(item.currentStock||0)}, Required: ${stockRequired}`);
         total+=calc.total;
-        normalized.push({line,item,baseQuantity,freeQuantity,amount,taxAmount:calc.taxAmount,taxRate:calc.taxRate,discountPercentage:calc.discountPercentage,discountAmount:calc.discount,batch,price,godownId:line.godownId||null,schemeBuyQty,schemeFreeQty});
+        normalized.push({line,item,baseQuantity,priceUnitId,freeQuantity,amount,taxAmount:calc.taxAmount,taxRate:calc.taxRate,discountPercentage:calc.discountPercentage,discountAmount:calc.discount,batch,price,godownId:line.godownId||null,schemeBuyQty,schemeFreeQty});
       }
       const rawTotal=+total.toFixed(2); const finalTotal=Number.isFinite(Number(requestedTotal)) ? Number(requestedTotal) : +(rawTotal + Number(roundOff||0)).toFixed(2); const finalRoundOff=+(finalTotal-rawTotal).toFixed(2);
       db.prepare('INSERT INTO counter_sales(id,firmId,counterNo,saleDate,saleTime,customerName,total,roundOff,status,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(id,firmId,next,saleDate,saleTime,customerName||null,finalTotal,finalRoundOff,'open',now,now);
       for(const x of normalized){
-        const {line,item,baseQuantity,freeQuantity,amount,taxAmount,taxRate,discountPercentage,discountAmount,batch,price,godownId,schemeBuyQty,schemeFreeQty}=x;
-        db.prepare(`INSERT INTO counter_sale_items(id,counterSaleId,firmId,itemId,name,quantity,unit,unitId,isSecondaryUnit,baseQuantity,secondaryQuantity,secondaryUnitId,price,taxRate,taxAmount,amount,batchId,batchNumber,expiryDate,expiryMonth,expiryYear,mfgDate,packing,mrp,freeQuantity,sellingRate,schemeBuyQty,schemeFreeQty,godownId,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(uuidv4(),id,firmId,item.id,item.name,Number(line.quantity)||0,line.unit||item.unitName||'',item.unitId||null,line.isSecondaryUnit?1:0,baseQuantity,Number(line.secondaryQuantity)||0,line.secondaryUnitId||null,price,taxRate,taxAmount,amount,batch?.id||line.batchId||null,batch?.batchNumber||line.batchNumber||null,null,normalizeExpiryMonth(batch?.expiryMonth ?? line.expiryMonth ?? parseExpiryInput(line.expiryDate).month ?? expiryFromLegacyDate(line.expiryDate).month),normalizeExpiryYear(batch?.expiryYear ?? line.expiryYear ?? parseExpiryInput(line.expiryDate).year ?? expiryFromLegacyDate(line.expiryDate).year),batch?.mfgDate||line.mfgDate||null,batch?.packing||line.packing||item.packing||null,Number(line.mrp)||Number(batch?.mrp)||Number(item.salePrice)||0,freeQuantity,Number(batch?.sellingRate||price||0),schemeBuyQty,schemeFreeQty,godownId,now,now);
+        const {line,item,baseQuantity,priceUnitId,freeQuantity,amount,taxAmount,taxRate,discountPercentage,discountAmount,batch,price,godownId,schemeBuyQty,schemeFreeQty}=x;
+        db.prepare(`INSERT INTO counter_sale_items(id,counterSaleId,firmId,itemId,name,quantity,unit,unitId,isSecondaryUnit,baseQuantity,secondaryQuantity,secondaryUnitId,priceUnitId,price,discountPercentage,discountAmount,taxRate,taxAmount,amount,batchId,batchNumber,expiryDate,expiryMonth,expiryYear,mfgDate,packing,mrp,freeQuantity,sellingRate,schemeBuyQty,schemeFreeQty,godownId,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(uuidv4(),id,firmId,item.id,item.name,Number(line.quantity)||0,line.unit||item.unitName||'',item.unitId||null,line.isSecondaryUnit?1:0,baseQuantity,Number(line.secondaryQuantity)||0,line.secondaryUnitId||null,priceUnitId||null,price,discountPercentage,discountAmount,taxRate,taxAmount,amount,batch?.id||line.batchId||null,batch?.batchNumber||line.batchNumber||null,null,normalizeExpiryMonth(batch?.expiryMonth ?? line.expiryMonth ?? parseExpiryInput(line.expiryDate).month ?? expiryFromLegacyDate(line.expiryDate).month),normalizeExpiryYear(batch?.expiryYear ?? line.expiryYear ?? parseExpiryInput(line.expiryDate).year ?? expiryFromLegacyDate(line.expiryDate).year),batch?.mfgDate||line.mfgDate||null,batch?.packing||line.packing||item.packing||null,Number(line.mrp)||Number(batch?.mrp)||Number(item.salePrice)||0,freeQuantity,Number(batch?.sellingRate||price||0),schemeBuyQty,schemeFreeQty,godownId,now,now);
       }
     });
     run();
@@ -217,7 +229,7 @@ router.patch('/:id', (req:Request,res:Response)=>{
   try {
     const {firmId}=req.query as any;
     const id=String(req.params.id||'');
-    const {quantity,discountPercentage,price}=req.body||{};
+    const {quantity,discountPercentage,discountAmount,price}=req.body||{};
     if(!firmId || !id) return res.status(400).json({error:'firmId and counter sale id are required'});
     const result=db.transaction(()=>{
       const row=db.prepare("SELECT * FROM counter_sales WHERE id=? AND firmId=? AND status='open'").get(id,firmId) as any;
@@ -248,11 +260,11 @@ router.patch('/:id', (req:Request,res:Response)=>{
         const godownId=line.godownId||resolveDefaultGodown(firmId).id;
         applyStoreStockForCounter(firmId,item.id,String(godownId),-delta,item.name,isNegativeStockAllowed(firmId),nowStock);
       }
-      const calc=calculateLine(nextPrice,nextQty,nextDiscount,Number(line.taxRate||item.taxRate||0));
+      const calc=calculateLine(nextPrice,baseQuantity,nextDiscount,Number(line.taxRate||item.taxRate||0),discountAmount===undefined?undefined:Number(discountAmount));
       const now=new Date().toISOString();
-      db.prepare('UPDATE counter_sale_items SET quantity=?,baseQuantity=?,price=?,discountPercentage=?,taxRate=?,taxAmount=?,amount=?,updatedAt=? WHERE id=? AND firmId=?').run(nextQty,baseQuantity,nextPrice,calc.discountPercentage,calc.taxRate,calc.taxAmount,calc.amount,now,line.id,firmId);
+      db.prepare('UPDATE counter_sale_items SET quantity=?,baseQuantity=?,price=?,discountPercentage=?,discountAmount=?,taxRate=?,taxAmount=?,amount=?,updatedAt=? WHERE id=? AND firmId=?').run(nextQty,baseQuantity,nextPrice,calc.discountPercentage,calc.discount,calc.taxRate,calc.taxAmount,calc.amount,now,line.id,firmId);
       db.prepare('UPDATE counter_sales SET total=?,roundOff=0,updatedAt=? WHERE id=? AND firmId=?').run(calc.total,now,id,firmId);
-      return {id,quantity:nextQty,price:nextPrice,discountPercentage:calc.discountPercentage,taxRate:calc.taxRate,taxAmount:calc.taxAmount,amount:calc.amount,total:calc.total};
+      return {id,quantity:nextQty,price:nextPrice,discountPercentage:calc.discountPercentage,discountAmount:calc.discount,taxRate:calc.taxRate,taxAmount:calc.taxAmount,amount:calc.amount,total:calc.total};
     });
     res.json({success:true,data:result});
   } catch(e:any) { res.status(400).json({error:e.message}); }
@@ -332,15 +344,16 @@ router.post('/convert', (req:Request,res:Response)=>{
       }
       const total=rows.reduce((s,r)=>s+Number(r.total||0),0); const roundOff=rows.reduce((s,r)=>s+Number(r.roundOff||0),0);
       const taxTotal=itemRows.reduce((s,it)=>s+Number(it.taxAmount||0),0);
+      const discountTotal=itemRows.reduce((s,it)=>s+Number(it.discountAmount ?? ((Number(it.price||0)*Number(it.quantity||0))-(Number(it.amount||0)))),0);
       const seriesSetting=getModuleSettings(firmId,'sale_invoice');
       let docNumber=''; let seriesId:any=null;
       if(seriesSetting.multiSeriesEnabled){ const ds=db.prepare('SELECT id FROM series WHERE firmId=? AND transactionType=? AND isActive=1 AND isDefault=1 LIMIT 1').get(firmId,'sale_invoice') as any; if(ds){const g=generateSeriesNumber(ds.id);docNumber=g.documentNumber;seriesId=g.seriesId;} }
       if(!docNumber){const firm=db.prepare('SELECT invoicePrefix,invoiceNumber FROM firms WHERE id=?').get(firmId) as any;docNumber=`${firm?.invoicePrefix||'INV'}-${String(firm?.invoiceNumber||1).padStart(4,'0')}`;db.prepare('UPDATE firms SET invoiceNumber=invoiceNumber+1 WHERE id=?').run(firmId)}
       const cols=new Set((db.prepare('PRAGMA table_info(documents)').all() as any[]).map(c=>c.name));
-      const vals:any={id:documentId,firmId,documentType:'sale_invoice',documentNumber:docNumber,seriesId,documentDate:new Date().toISOString().slice(0,10),documentTime:new Date().toTimeString().slice(0,8),partyId:null,partyName:'Counter Sale / Walk-in',partyType:'customer',phone:'',billingAddress:'',shippingAddress:'',transactionType:'cash',status:'active',subtotal:total-taxTotal,discountAmount:0,discountPercentage:0,taxAmount:taxTotal,shippingCharges:0,packagingCharges:0,adjustment:0,roundOff,total,paidAmount:total,balanceAmount:0,paymentType:'cash',description:`Converted from Counter Sale: ${rows.map(r=>`#${r.counterNo}`).join(', ')}`,createdAt:now,updatedAt:now};
+      const vals:any={id:documentId,firmId,documentType:'sale_invoice',documentNumber:docNumber,seriesId,documentDate:new Date().toISOString().slice(0,10),documentTime:new Date().toTimeString().slice(0,8),partyId:null,partyName:'Counter Sale / Walk-in',partyType:'customer',phone:'',billingAddress:'',shippingAddress:'',transactionType:'cash',status:'active',subtotal:total-taxTotal+discountTotal,discountAmount:discountTotal,discountPercentage:0,taxAmount:taxTotal,shippingCharges:0,packagingCharges:0,adjustment:0,roundOff,total,paidAmount:total,balanceAmount:0,paymentType:'cash',description:`Converted from Counter Sale: ${rows.map(r=>`#${r.counterNo}`).join(', ')}`,createdAt:now,updatedAt:now};
       const dc=Object.keys(vals).filter(k=>cols.has(k)); db.prepare(`INSERT INTO documents (${dc.join(',')}) VALUES (${dc.map(()=>'?').join(',')})`).run(...dc.map(k=>vals[k]));
       const icols=new Set((db.prepare('PRAGMA table_info(document_items)').all() as any[]).map(c=>c.name));
-      for(const it of itemRows){const v:any={id:uuidv4(),documentId,firmId,itemId:it.itemId,name:it.name,description:'',hsnCode:null,quantity:it.quantity,unit:it.unit,unitId:it.unitId,isSecondaryUnit:it.isSecondaryUnit,baseQuantity:it.baseQuantity,secondaryQuantity:it.secondaryQuantity,secondaryUnitId:it.secondaryUnitId,price:it.price,discount:0,discountType:'percentage',discountPercentage:0,discountAmount:0,taxRate:Number(it.taxRate)||0,taxAmount:Number(it.taxAmount)||0,amount:it.amount,batchId:it.batchId,batchNumber:it.batchNumber,expiryDate:null,expiryMonth:it.expiryMonth,expiryYear:it.expiryYear,mfgDate:it.mfgDate,packing:it.packing,freeQuantity:Number(it.freeQuantity||0),mrp:it.mrp,sellingRate:it.sellingRate||it.price,markup:0,manufacturingRate:0,schemeBuyQty:Number(it.schemeBuyQty||0),schemeFreeQty:Number(it.schemeFreeQty||0),createdAt:now,updatedAt:now};const c=Object.keys(v).filter(k=>icols.has(k));db.prepare(`INSERT INTO document_items (${c.join(',')}) VALUES (${c.map(()=>'?').join(',')})`).run(...c.map(k=>v[k]));}
+      for(const it of itemRows){const v:any={id:uuidv4(),documentId,firmId,itemId:it.itemId,name:it.name,description:'',hsnCode:null,quantity:it.quantity,unit:it.unit,unitId:it.unitId,isSecondaryUnit:it.isSecondaryUnit,baseQuantity:it.baseQuantity,secondaryQuantity:it.secondaryQuantity,secondaryUnitId:it.secondaryUnitId,price:it.price,discount:Number(it.discountPercentage||0),discountType:'percentage',discountPercentage:Number(it.discountPercentage||0),discountAmount:Number(it.discountAmount ?? ((Number(it.price||0)*Number(it.quantity||0))-(Number(it.amount||0)))),taxRate:Number(it.taxRate)||0,taxAmount:Number(it.taxAmount)||0,amount:it.amount,batchId:it.batchId,batchNumber:it.batchNumber,expiryDate:null,expiryMonth:it.expiryMonth,expiryYear:it.expiryYear,mfgDate:it.mfgDate,packing:it.packing,freeQuantity:Number(it.freeQuantity||0),mrp:it.mrp,sellingRate:it.sellingRate||it.price,markup:0,manufacturingRate:0,schemeBuyQty:Number(it.schemeBuyQty||0),schemeFreeQty:Number(it.schemeFreeQty||0),createdAt:now,updatedAt:now};const c=Object.keys(v).filter(k=>icols.has(k));db.prepare(`INSERT INTO document_items (${c.join(',')}) VALUES (${c.map(()=>'?').join(',')})`).run(...c.map(k=>v[k]));}
       db.prepare(`UPDATE counter_sales SET status='converted',convertedDocumentId=?,updatedAt=? WHERE id IN (${placeholders}) AND firmId=?`).run(documentId,now,...ids,firmId);
       return {documentId,documentNumber:docNumber,convertedCount:rows.length,total,roundOff};
     });

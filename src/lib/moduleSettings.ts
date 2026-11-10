@@ -68,6 +68,8 @@ export interface ModuleSettings {
   netRateEnabled: boolean;
   gstPercentageEnabled: boolean;
   printBarcodeAfterPurchase: boolean;
+  priceUnitBasisEnabled: boolean;
+  priceUnitBasis: 'unit1' | 'unit2';
 }
 
 const FEATURE_DEFAULTS: ModuleSettings = {
@@ -75,8 +77,8 @@ const FEATURE_DEFAULTS: ModuleSettings = {
   unitsEnabled: true,
   itemDiscountEnabled: true,
   billDiscountEnabled: true,
-  packingEnabled: true, batchEnabled: true, expiryEnabled: true, mfgDateEnabled: true,
-  freeQuantityEnabled: true, mrpEnabled: true, sellingRateEnabled: true,
+  packingEnabled: false, batchEnabled: false, expiryEnabled: false, mfgDateEnabled: false,
+  freeQuantityEnabled: false, mrpEnabled: false, sellingRateEnabled: true,
   allowNegativeStock: false,
   allowDuplicateItemCode: false,
   allowDuplicateItems: false,
@@ -87,18 +89,20 @@ const FEATURE_DEFAULTS: ModuleSettings = {
   transactionSidebarCollapsed: false,
   purchaseRateEnabled: false,
   discountPercentageEnabled: true,
-  discountAmountEnabled: true,
+  discountAmountEnabled: false,
   unit1Enabled: true,
   hsnEnabled: true,
   unit2Enabled: false,
   serialNumberEnabled: true,
   itemNameEnabled: true,
   barcodeEnabled: true,
-  accessionCodeEnabled: false,
+  accessionCodeEnabled: true,
   netAmountEnabled: true,
-  netRateEnabled: true,
+  netRateEnabled: false,
   gstPercentageEnabled: true,
   printBarcodeAfterPurchase: false,
+  priceUnitBasisEnabled: false,
+  priceUnitBasis: 'unit1',
 };
 
 
@@ -187,6 +191,8 @@ export function getModuleSettings(firmId: string, moduleKey: string): ModuleSett
     if (r.settingKey === 'netRateEnabled') out.netRateEnabled = r.settingValue === 'true';
     if (r.settingKey === 'gstPercentageEnabled') out.gstPercentageEnabled = r.settingValue === 'true';
     if (r.settingKey === 'printBarcodeAfterPurchase') out.printBarcodeAfterPurchase = r.settingValue === 'true';
+    if (r.settingKey === 'priceUnitBasisEnabled') out.priceUnitBasisEnabled = r.settingValue === 'true';
+    if (r.settingKey === 'priceUnitBasis') out.priceUnitBasis = r.settingValue === 'unit2' ? 'unit2' : 'unit1';
   }
   const globalRows = db.prepare("SELECT settingKey, settingValue FROM firm_settings WHERE firmId=? AND settingType='inventory_global' ORDER BY datetime(updatedAt) DESC, rowid DESC").all(firmId) as any[];
   // Negative stock is a firm-wide inventory policy, not a per-document override.

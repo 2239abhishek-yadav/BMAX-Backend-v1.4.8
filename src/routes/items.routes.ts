@@ -38,7 +38,7 @@ router.get('/export/excel', (req: Request, res: Response) => {
     const search = String(req.query.search || '').trim();
     const companyId = String(req.query.companyId || '').trim();
     const categoryId = String(req.query.categoryId || '').trim();
-    let q = `SELECT i.itemCode AS [Item Code], i.barcode AS [Barcode], i.name AS [Item Name],
+    let q = `SELECT i.itemCode AS [Item Code], i.accessionCode AS [Accession Number], i.barcode AS [Barcode], i.name AS [Item Name],
       u.shortName AS [Unit 1], su.shortName AS [Unit 2], i.conversionFactor AS [Unit Conversion],
       i.hsnCode AS [HSN Code], i.taxRate AS [GST Rate (%)], i.mrp AS [MRP], i.salePrice AS [Selling Rate],
       i.saleDiscount AS [Discount %], i.discount1 AS [Discount 1 %], i.volumeDiscount AS [Volume Discount %],
@@ -59,7 +59,7 @@ router.get('/export/excel', (req: Request, res: Response) => {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(rows, { skipHeader: false });
     ws['!cols'] = Object.keys(rows[0] || {
-      'Item Code':'','Barcode':'','Item Name':'','Unit 1':'','Unit 2':'','Unit Conversion':'','HSN Code':'','GST Rate (%)':'','MRP':'','Selling Rate':'','Discount %':'','Discount 1 %':'','Volume Discount %':'','Purchase Rate':'','Purchase Tax Inclusive (YES/NO)':'','Sale Tax Inclusive (YES/NO)':'','Type (PRODUCT/SERVICE)':'','Category Name':'','Min Stock Level':'','Opening Stock':'','Storage Location':'','Packing':'','Batch Number':'','MFG Date':'','Expiry Date':'','Description':''
+      'Item Code':'','Accession Number':'','Barcode':'','Item Name':'','Unit 1':'','Unit 2':'','Unit Conversion':'','HSN Code':'','GST Rate (%)':'','MRP':'','Selling Rate':'','Discount %':'','Discount 1 %':'','Volume Discount %':'','Purchase Rate':'','Purchase Tax Inclusive (YES/NO)':'','Sale Tax Inclusive (YES/NO)':'','Type (PRODUCT/SERVICE)':'','Category Name':'','Min Stock Level':'','Opening Stock':'','Storage Location':'','Packing':'','Batch Number':'','MFG Date':'','Expiry Date':'','Description':''
     }).map((h:string)=>({wch:Math.max(16,Math.min(34,h.length+4))}));
     XLSX.utils.book_append_sheet(wb, ws, 'Items');
     const info = XLSX.utils.aoa_to_sheet([
@@ -108,7 +108,7 @@ router.get('/', (req: Request, res: Response) => {
       ? Number((db.prepare(`SELECT COUNT(*) AS total FROM items i${where}`).get(...params) as any)?.total || 0)
       : undefined;
     let query = `SELECT i.*, c.name as categoryName, u.name as unitName, u.shortName as unitShortName,
-      su.name as secondaryUnitName, su.shortName as secondaryUnitShortName, ic.name as companyName
+      su.name as secondaryUnitName, su.shortName as secondaryUnitShortName, pu.name as priceUnitName, pu.shortName as priceUnitShortName, ic.name as companyName
       FROM items i LEFT JOIN categories c ON i.categoryId = c.id
       LEFT JOIN units u ON i.unitId = u.id
       LEFT JOIN units su ON i.secondaryUnitId = su.id
@@ -207,8 +207,8 @@ router.post('/', (req: Request, res: Response) => {
     const now = new Date().toISOString();
     const id = uuidv4();
     const {
-      firmId, name, type = 'PRODUCT', itemRole = 'FINISHED_GOOD', hsnCode, itemCode, sku, barcode, description, imageUrl,
-      categoryId, companyId, unitId, secondaryUnitId, conversionFactor = 1,
+      firmId, name, type = 'PRODUCT', itemRole = 'FINISHED_GOOD', hsnCode, itemCode, accessionCode, sku, barcode, description, imageUrl,
+      categoryId, companyId, unitId, secondaryUnitId, conversionFactor = 1, priceUnitId,
       mrp = 0, salePrice = 0, salePriceTaxInclusive = 0,
       saleDiscount = 0, saleDiscountType = 'percentage',
       purchasePrice = 0, purchasePriceTaxInclusive = 0,
@@ -257,18 +257,21 @@ router.post('/', (req: Request, res: Response) => {
     if (secondaryUnitId && convFactor <= 0) {
       return res.status(400).json({ error: 'Conversion quantity must be greater than 0' });
     }
+    const itemPriceSettings = getModuleSettings(String(firmId), 'items');
+    const effectivePriceUnitId = String(priceUnitId || (itemPriceSettings.priceUnitBasisEnabled && itemPriceSettings.priceUnitBasis === 'unit2' && secondaryUnitId ? secondaryUnitId : unitId) || '');
+    if (effectivePriceUnitId && ![String(unitId || ''), String(secondaryUnitId || '')].includes(effectivePriceUnitId)) return res.status(400).json({ error: 'Price unit must be Unit 1 or Unit 2 for this item' });
 
     db.prepare(`
-      INSERT INTO items (id, firmId, name, type, itemRole, hsnCode, itemCode, sku, barcode, description, imageUrl,
-        categoryId, companyId, unitId, secondaryUnitId, conversionFactor,
+      INSERT INTO items (id, firmId, name, type, itemRole, hsnCode, itemCode, accessionCode, sku, barcode, description, imageUrl,
+        categoryId, companyId, unitId, secondaryUnitId, conversionFactor, priceUnitId,
         mrp, salePrice, salePriceTaxInclusive, saleDiscount, saleDiscountType,
         purchasePrice, purchasePriceTaxInclusive, taxRate, openingStock, currentStock,
         minStockLevel, location, batchNumber, expiryDate, packing,
         enableBatchTracking, enableSerialTracking, isActive, isFavorite, allowNegativeStock, decimalEnabled,
         createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, firmId, name, type, effectiveItemRole, hsnCode, itemCode, sku || null, normalizedBarcode || null, description, imageUrl,
-      categoryId, companyId, unitId, secondaryUnitId || null, convFactor,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, firmId, name, type, effectiveItemRole, hsnCode, itemCode, accessionCode || null, sku || null, normalizedBarcode || null, description, imageUrl,
+      categoryId, companyId, unitId, secondaryUnitId || null, convFactor, effectivePriceUnitId || null,
       normalizedMrp, salePrice, salePriceTaxInclusive ? 1 : 0,
       saleDiscount, saleDiscountType, purchasePrice, purchasePriceTaxInclusive ? 1 : 0,
       normalizedTaxRate, openingStock, openingStock, minStockLevel, location, batchNumber, expiryDate, packing,
@@ -302,8 +305,8 @@ router.put('/:id', (req: Request, res: Response) => {
   try {
     const now = new Date().toISOString();
     const {
-      name, type, itemRole, hsnCode, itemCode, sku, barcode, description, imageUrl,
-      categoryId, companyId, unitId, secondaryUnitId, conversionFactor,
+      name, type, itemRole, hsnCode, itemCode, accessionCode, sku, barcode, description, imageUrl,
+      categoryId, companyId, unitId, secondaryUnitId, conversionFactor, priceUnitId,
       mrp, salePrice, salePriceTaxInclusive,
       saleDiscount, saleDiscountType, purchasePrice, purchasePriceTaxInclusive,
       taxRate, minStockLevel, location, batchNumber, expiryDate, packing,
@@ -329,7 +332,12 @@ router.put('/:id', (req: Request, res: Response) => {
     const normalizedMrp = mrpSetting ? Number(mrp ?? 0) : existingMrp;
     if (!Number.isFinite(normalizedMrp) || normalizedMrp < 0) return res.status(400).json({ error: 'MRP cannot be negative' });
     const precisionItem = { name: normalizedName, decimalEnabled: decimalEnabled ? 1 : 0 };
-    const current:any = db.prepare('SELECT name,openingStock,minStockLevel FROM items WHERE id=? AND firmId=?').get(req.params.id, req.body.firmId);
+    const current:any = db.prepare('SELECT name,openingStock,minStockLevel,unitId,secondaryUnitId,priceUnitId FROM items WHERE id=? AND firmId=?').get(req.params.id, req.body.firmId);
+    const requestedPriceUnitId = String(priceUnitId || current?.priceUnitId || unitId || current?.unitId || '');
+    const allowedPriceUnitIds = [String(unitId || current?.unitId || ''), String(secondaryUnitId || '')].filter(Boolean);
+    // If Unit 2 is removed, keep the canonical Unit 1 prices unchanged and
+    // safely re-label their basis as Unit 1 instead of blocking the item edit.
+    const effectivePriceUnitId = allowedPriceUnitIds.includes(requestedPriceUnitId) ? requestedPriceUnitId : String(unitId || current?.unitId || '');
     assertItemQuantityPrecision(precisionItem, current?.openingStock ?? 0, 'Opening stock');
     assertItemQuantityPrecision(precisionItem, minStockLevel ?? 0, 'Minimum stock level');
     const allowDuplicateCode = db.prepare("SELECT settingValue FROM firm_settings WHERE firmId=? AND settingType='items' AND settingKey='allowDuplicateItemCode'").get(req.body.firmId) as any;
@@ -349,15 +357,15 @@ router.put('/:id', (req: Request, res: Response) => {
     }
 
     db.prepare(`
-      UPDATE items SET name=?, type=?, itemRole=?, hsnCode=?, itemCode=?, sku=?, barcode=?, description=?, imageUrl=?,
-        categoryId=?, companyId=?, unitId=?, secondaryUnitId=?, conversionFactor=?,
+      UPDATE items SET name=?, type=?, itemRole=?, hsnCode=?, itemCode=?, accessionCode=?, sku=?, barcode=?, description=?, imageUrl=?,
+        categoryId=?, companyId=?, unitId=?, secondaryUnitId=?, conversionFactor=?, priceUnitId=?,
         mrp=?, salePrice=?, salePriceTaxInclusive=?, saleDiscount=?,
         saleDiscountType=?, purchasePrice=?, purchasePriceTaxInclusive=?, taxRate=?,
         minStockLevel=?, location=?, batchNumber=?, expiryDate=?, packing=?,
         enableBatchTracking=?, enableSerialTracking=?, isActive=?, isFavorite=?,
         allowNegativeStock=?, decimalEnabled=?, updatedAt=? WHERE id=?
-    `).run(name, type, effectiveItemRole, hsnCode, itemCode, sku, normalizedBarcode || null, description, imageUrl,
-      categoryId, companyId, unitId, secondaryUnitId || null, convFactor,
+    `).run(name, type, effectiveItemRole, hsnCode, itemCode, accessionCode || null, sku, normalizedBarcode || null, description, imageUrl,
+      categoryId, companyId, unitId, secondaryUnitId || null, convFactor, effectivePriceUnitId || null,
       normalizedMrp, salePrice, salePriceTaxInclusive ? 1 : 0,
       saleDiscount, saleDiscountType, purchasePrice, purchasePriceTaxInclusive ? 1 : 0,
       normalizedTaxRate, minStockLevel, location, batchNumber, expiryDate, packing,

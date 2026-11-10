@@ -28,8 +28,8 @@ function auditSnapshot(doc:any,items:any[]=[]){const s:any={}; for(const k of AU
 function auditDiff(a:any,b:any){const c:any={}; for(const k of AUDIT_FIELDS)if(String(a?.[k]??'')!==String(b?.[k]??''))c[k]={old:a?.[k]??null,new:b?.[k]??null}; const rates=(s:any)=>(s?.items||[]).map((x:any)=>`${x.name||x.itemId||'Item'}: ${Number(x.price||0).toFixed(2)}`).join(' | '); if(rates(a)!==rates(b))c['Item Rates']={old:rates(a)||'—',new:rates(b)||'—'}; const qty=(s:any)=>(s?.items||[]).map((x:any)=>`${x.name||x.itemId||'Item'}: ${Number(x.quantity||0)}`).join(' | '); if(qty(a)!==qty(b))c['Item Quantities']={old:qty(a)||'—',new:qty(b)||'—'}; return c;}
 function writeDocumentAudit(documentId:string,firmId:string,action:string,oldDoc:any,oldItems:any[],newDoc:any,newItems:any[],req:any,note?:string){const changes=action==='MODIFIED'?auditDiff(auditSnapshot(oldDoc,oldItems),auditSnapshot(newDoc,newItems)):action==='CREATED'?{documentNumber:{old:null,new:newDoc?.documentNumber||null},total:{old:null,new:newDoc?.total??0}}:{documentNumber:{old:oldDoc?.documentNumber||null,new:null},total:{old:oldDoc?.total??0,new:null}}; db.prepare(`INSERT INTO document_audit_logs (id,firmId,documentId,action,changesJson,note,actorId,actorName,createdAt) VALUES (?,?,?,?,?,?,?,?,?)`).run(uuidv4(),firmId,documentId,action,JSON.stringify(changes),note||null,req?.body?.userId||req?.user?.id||null,req?.body?.userName||req?.user?.name||'System',new Date().toISOString());}
 
-function firmTaxConfig(firmId:string){ const f:any=db.prepare('SELECT gstType,vatRate FROM firms WHERE id=?').get(firmId); const mode=String(f?.gstType||'regular'); return {mode, enabled:mode!=='none', vatRate:Number(f?.vatRate||5)}; }
-function validateLineTax(firmId:string, rate:number){ const c=firmTaxConfig(firmId); if(!c.enabled && rate!==0) throw new Error('Tax must be 0% when No GST is selected'); if(c.mode==='vat'){ if(!Number.isFinite(rate)||rate<0||rate>100) throw new Error('VAT rate must be between 0% and 100%'); return; } if(!VALID_GST_SLABS.includes(rate)) throw new Error('GST rate must be one of 0%, 5% or 18%'); }
+function firmTaxConfig(firmId:string){ const f:any=db.prepare('SELECT gstType,vatRate,gstin FROM firms WHERE id=?').get(firmId); const mode=String(f?.gstType||'regular'); return {mode, gstin:String(f?.gstin||'').trim(), enabled:mode==='vat' || (mode==='regular' && !!String(f?.gstin||'').trim()), vatRate:Number(f?.vatRate||5)}; }
+function validateLineTax(firmId:string, rate:number, documentType?:string){ const c=firmTaxConfig(firmId); const salesSide=['sale_invoice','sale_order','sale_return','sale_return_challan','sale_quotation','sale_proforma','delivery_challan'].includes(String(documentType||'')); if(salesSide && c.mode!=='vat' && !c.enabled && rate!==0) throw new Error(c.mode==='composition' ? 'Composition taxpayers cannot collect GST separately; use a Bill of Supply.' : 'Sales GST requires Regular GST mode and a GSTIN. Set the item tax rate to 0% or add the firm GSTIN.'); if(c.mode==='vat'){ if(!Number.isFinite(rate)||rate<0||rate>100) throw new Error('VAT rate must be between 0% and 100%'); return; } if(!VALID_GST_SLABS.includes(rate)) throw new Error('GST rate must be one of 0%, 5% or 18%'); }
 function lineExpiry(item:any): { month:number|null; year:number|null } {
   const parsed=parseExpiryInput(item?.expiryDate);
   const legacy=expiryFromLegacyDate(item?.expiryDate);
@@ -338,7 +338,7 @@ router.post('/hold', (req: Request, res: Response) => {
     for(const item of items){
       const dbItem=item.itemId?db.prepare('SELECT unitId,secondaryUnitId,conversionFactor FROM items WHERE id=?').get(item.itemId) as any:null;
       const resolved=resolveLineUnit(firmId,'sale_invoice',dbItem,item);
-      const vals:any={id:uuidv4(),documentId:id,firmId,itemId:item.itemId||null,godownId:item.godownId||b.godownId||null,name:item.name,description:item.description,hsnCode:item.hsnCode,quantity:item.quantity||0,unit:item.unit,unitId:resolved.unitId,isSecondaryUnit:resolved.isSecondaryUnit,baseQuantity:resolved.baseQuantity,secondaryQuantity:item.secondaryQuantity||0,secondaryUnitId:item.secondaryUnitId||null,price:item.price||0,discount:item.discount||0,discountType:item.discountType||'amount',discountPercentage:item.discountPercentage||0,discountAmount:item.discountAmount||0,taxRate:item.taxRate||0,taxAmount:item.taxAmount||0,amount:item.amount||0,batchId:batchDetailsAllowed ? (item.batchId||null) : null,batchNumber:batchDetailsAllowed ? (item.batchNumber||null) : null,expiryDate:null,expiryMonth:batchDetailsAllowed ? lineExpiry(item).month : null,expiryYear:batchDetailsAllowed ? lineExpiry(item).year : null,mfgDate:batchDetailsAllowed ? (item.mfgDate||null) : null,packing:item.packing||null,freeQuantity:item.freeQuantity||0,mrp:item.mrp||0,sellingRate:item.sellingRate||0,markup:item.markup||0,createdAt:now,updatedAt:now};
+      const vals:any={id:uuidv4(),documentId:id,firmId,itemId:item.itemId||null,godownId:item.godownId||b.godownId||null,name:item.name,description:item.description,hsnCode:item.hsnCode,quantity:item.quantity||0,unit:item.unit,unitId:resolved.unitId,isSecondaryUnit:resolved.isSecondaryUnit,baseQuantity:resolved.baseQuantity,secondaryQuantity:item.secondaryQuantity||0,secondaryUnitId:item.secondaryUnitId||null,priceUnitId:item.priceUnitId||null,price:item.price||0,discount:item.discount||0,discountType:item.discountType||'amount',discountPercentage:item.discountPercentage||0,discountAmount:item.discountAmount||0,taxRate:item.taxRate||0,taxAmount:item.taxAmount||0,amount:item.amount||0,batchId:batchDetailsAllowed ? (item.batchId||null) : null,batchNumber:batchDetailsAllowed ? (item.batchNumber||null) : null,expiryDate:null,expiryMonth:batchDetailsAllowed ? lineExpiry(item).month : null,expiryYear:batchDetailsAllowed ? lineExpiry(item).year : null,mfgDate:batchDetailsAllowed ? (item.mfgDate||null) : null,packing:item.packing||null,freeQuantity:item.freeQuantity||0,mrp:item.mrp||0,sellingRate:item.sellingRate||0,markup:item.markup||0,createdAt:now,updatedAt:now};
       const cs=Object.keys(vals).filter(k=>icols.has(k)); db.prepare(`INSERT INTO document_items (${cs.join(',')}) VALUES (${cs.map(()=>'?').join(',')})`).run(...cs.map(k=>vals[k]));
     }
     const doc=db.prepare('SELECT * FROM documents WHERE id=?').get(id) as any; const docItems=db.prepare('SELECT * FROM document_items WHERE documentId=?').all(id);
@@ -359,14 +359,19 @@ router.get('/:id/logs', (req: Request, res: Response) => {
 
 router.get('/:id', (req: Request, res: Response) => {
   try {
-    const doc = db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
-    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    const requestedFirmId = String(req.query.firmId || '').trim();
+    const doc = requestedFirmId
+      ? db.prepare('SELECT * FROM documents WHERE id = ? AND firmId = ?').get(req.params.id, requestedFirmId)
+      : db.prepare('SELECT * FROM documents WHERE id = ?').get(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'Document not found in the active company' });
     // Hydrate saved batch metadata from the authoritative inventory batch record.
     // Older document_items rows may have NULL expiry fields even though the batch
     // itself has the correct expiry. Returning the canonical batch values here
     // makes Modify/Print/View show the same batch + expiry information consistently.
     const items = db.prepare(`SELECT di.*,
-      COALESCE(di.batchNumber, b.batchNumber) AS batchNumber,
+      COALESCE(NULLIF(di.name,''), i.name) AS resolvedName,
+      COALESCE(NULLIF(di.hsnCode,''), i.hsnCode) AS resolvedHsnCode,
+      COALESCE(NULLIF(di.batchNumber, ''), b.batchNumber) AS batchNumber,
       COALESCE(di.expiryDate, b.expiryDate) AS expiryDate,
       COALESCE(di.expiryMonth, b.expiryMonth) AS expiryMonth,
       COALESCE(di.expiryYear, b.expiryYear) AS expiryYear,
@@ -375,6 +380,7 @@ router.get('/:id', (req: Request, res: Response) => {
       COALESCE(di.mrp, b.mrp) AS mrp,
       COALESCE(di.sellingRate, b.sellingRate) AS sellingRate
       FROM document_items di
+      LEFT JOIN items i ON i.id=di.itemId AND i.firmId=di.firmId
       LEFT JOIN inventory_batches b ON b.id=di.batchId AND b.firmId=di.firmId
       WHERE di.documentId = ?
       ORDER BY di.createdAt ASC`).all(req.params.id);
@@ -500,7 +506,7 @@ router.post('/', (req: Request, res: Response) => {
     }
     if (resolvedDueDate && documentDate && resolvedDueDate < String(documentDate)) return res.status(400).json({ error: 'Due date cannot be before transaction date' });
     const resolvedGstRegistrationId = gstRegistrationId || (db.prepare('SELECT id FROM gst_registrations WHERE firmId=? AND isPrimary=1 AND isActive=1 LIMIT 1').get(firmId) as any)?.id || null;
-    if (Array.isArray(items)) { for (const line of items) { const rate = Number(line?.taxRate ?? 0); try { validateLineTax(String(firmId), rate); } catch(e:any) { return res.status(400).json({ error: e.message }); } } }
+    if (Array.isArray(items)) { for (const line of items) { const rate = Number(line?.taxRate ?? 0); try { validateLineTax(String(firmId), rate, String(documentType)); } catch(e:any) { return res.status(400).json({ error: e.message }); } } }
 
     // Accounting boundary: only posted bills/returns participate in receivable/payable.
     // Quotations, orders and delivery documents are operational and must never create
@@ -707,7 +713,7 @@ router.post('/', (req: Request, res: Response) => {
           id: uuidv4(), documentId: id, firmId, itemId: item.itemId, sourceDocumentId: item.sourceDocumentId || null, sourceDocumentItemId: item.sourceDocumentItemId || null, godownId: item.godownId || rawGodownId || null, name: item.name,
           description: item.description, hsnCode: item.hsnCode, quantity: item.quantity || 0,
           unit: item.unit, unitId: resolvedUnitId, isSecondaryUnit, baseQuantity,
-          secondaryQuantity: item.secondaryQuantity || 0, secondaryUnitId: item.secondaryUnitId || null,
+          secondaryQuantity: item.secondaryQuantity || 0, secondaryUnitId: item.secondaryUnitId || null, priceUnitId: item.priceUnitId || null,
           price: item.price || 0, discount: item.discount || 0, discountType: item.discountType || 'amount',
           discountPercentage: item.discountPercentage || 0, discountAmount: item.discountAmount || 0,
           taxRate: item.taxRate || 0, taxAmount: item.taxAmount || 0, amount: item.amount || 0,
@@ -1049,7 +1055,7 @@ router.post('/convert-proforma-to-invoice', (req: Request, res: Response) => {
       for(const item of sourceItems){
         const dbItem=item.itemId?db.prepare('SELECT unitId,secondaryUnitId,conversionFactor FROM items WHERE id=?').get(item.itemId) as any:null;
         const resolved=resolveLineUnit(firmId,'sale_invoice',dbItem,item);
-        const v:any={id:uuidv4(),documentId:id,firmId,itemId:item.itemId,name:item.name,description:item.description,hsnCode:item.hsnCode,quantity:item.quantity||0,unit:item.unit,unitId:resolved.unitId,isSecondaryUnit:resolved.isSecondaryUnit,baseQuantity:resolved.baseQuantity,secondaryQuantity:item.secondaryQuantity||0,secondaryUnitId:item.secondaryUnitId||null,price:item.price||0,discount:item.discount||0,discountType:item.discountType||'amount',discountPercentage:item.discountPercentage||0,discountAmount:item.discountAmount||0,taxRate:item.taxRate||0,taxAmount:item.taxAmount||0,amount:item.amount||0,batchId:batchDetailsAllowedForUpdate ? (item.batchId||null) : null,batchNumber:batchDetailsAllowedForUpdate ? (item.batchNumber||null) : null,expiryDate:null,expiryMonth:batchDetailsAllowedForUpdate ? lineExpiry(item).month : null,expiryYear:batchDetailsAllowedForUpdate ? lineExpiry(item).year : null,mfgDate:batchDetailsAllowedForUpdate ? (item.mfgDate||null) : null,packing:item.packing||null,freeQuantity:item.freeQuantity||0,mrp:item.mrp||0,sellingRate:item.sellingRate||0,markup:item.markup||0,createdAt:now,updatedAt:now};
+        const v:any={id:uuidv4(),documentId:id,firmId,itemId:item.itemId,name:item.name,description:item.description,hsnCode:item.hsnCode,quantity:item.quantity||0,unit:item.unit,unitId:resolved.unitId,isSecondaryUnit:resolved.isSecondaryUnit,baseQuantity:resolved.baseQuantity,secondaryQuantity:item.secondaryQuantity||0,secondaryUnitId:item.secondaryUnitId||null,priceUnitId:item.priceUnitId||null,price:item.price||0,discount:item.discount||0,discountType:item.discountType||'amount',discountPercentage:item.discountPercentage||0,discountAmount:item.discountAmount||0,taxRate:item.taxRate||0,taxAmount:item.taxAmount||0,amount:item.amount||0,batchId:batchDetailsAllowedForUpdate ? (item.batchId||null) : null,batchNumber:batchDetailsAllowedForUpdate ? (item.batchNumber||null) : null,expiryDate:null,expiryMonth:batchDetailsAllowedForUpdate ? lineExpiry(item).month : null,expiryYear:batchDetailsAllowedForUpdate ? lineExpiry(item).year : null,mfgDate:batchDetailsAllowedForUpdate ? (item.mfgDate||null) : null,packing:item.packing||null,freeQuantity:item.freeQuantity||0,mrp:item.mrp||0,sellingRate:item.sellingRate||0,markup:item.markup||0,createdAt:now,updatedAt:now};
         const cs=Object.keys(v).filter(k=>icols.has(k)); db.prepare(`INSERT INTO document_items (${cs.join(',')}) VALUES (${cs.map(()=>'?').join(',')})`).run(...cs.map(k=>v[k]));
         if(item.itemId && resolved.baseQuantity>0){ const qty=Number(resolved.baseQuantity); if(item.batchId) db.prepare('UPDATE inventory_batches SET quantity=quantity-?,updatedAt=? WHERE id=? AND firmId=?').run(qty,now,item.batchId,firmId); db.prepare('UPDATE items SET currentStock=currentStock-?,updatedAt=? WHERE id=?').run(qty,now,item.itemId); }
       }
@@ -1106,7 +1112,7 @@ router.put('/:id' , (req: Request, res: Response) => {
     const resolvedUpdateDocumentDate = String(documentDate || oldDoc?.documentDate || new Date().toISOString().slice(0,10)).slice(0,10);
     const resolvedUpdateEntryDate = String(entryDate || oldDoc?.entryDate || resolvedUpdateDocumentDate).slice(0,10);
 
-    if (Array.isArray(items)) { for (const line of items) { validateLineTax(String((req.body as any).firmId || oldDoc?.firmId || ''), Number(line?.taxRate ?? 0)); } }
+    if (Array.isArray(items)) { for (const line of items) { validateLineTax(String((req.body as any).firmId || oldDoc?.firmId || ''), Number(line?.taxRate ?? 0), String((req.body as any).documentType || oldDoc?.documentType || '')); } }
     const updatePhoneCheck = validateMobile(phone);
     if (!updatePhoneCheck.valid) return res.status(400).json({ error: updatePhoneCheck.error });
     const normalizedUpdatePhone = phone === undefined ? (oldDoc?.phone || '') : (updatePhoneCheck.value || '');
@@ -1262,7 +1268,7 @@ router.put('/:id' , (req: Request, res: Response) => {
 
       const updateItemValues: Record<string,any> = {
         id:uuidv4(),documentId:req.params.id,firmId:doc.firmId,itemId:item.itemId,godownId:item.godownId || updateGodownId || null,name:item.name,description:item.description,hsnCode:item.hsnCode,
-        quantity:item.quantity||0,unit:item.unit,unitId:resolvedUnitId,isSecondaryUnit:isSecondaryUnit,baseQuantity,secondaryQuantity:item.secondaryQuantity||0,secondaryUnitId:item.secondaryUnitId||null,
+        quantity:item.quantity||0,unit:item.unit,unitId:resolvedUnitId,isSecondaryUnit:isSecondaryUnit,baseQuantity,secondaryQuantity:item.secondaryQuantity||0,secondaryUnitId:item.secondaryUnitId||null,priceUnitId:item.priceUnitId||null,
         price:item.price||0,discount:item.discount||0,discountType:item.discountType||'amount',discountPercentage:item.discountPercentage||0,discountAmount:item.discountAmount||0,taxRate:item.taxRate||0,taxAmount:item.taxAmount||0,amount:item.amount||0,
         batchId:item.batchId||null,batchNumber:item.batchNumber||null,expiryDate:null,expiryMonth:lineExpiry(item).month,expiryYear:lineExpiry(item).year,mfgDate:item.mfgDate||null,packing:item.packing||null,freeQuantity:item.freeQuantity||0,mrp:item.mrp||0,sellingRate:item.sellingRate||0,markup:item.markup||0,createdAt:now,updatedAt:now
       };

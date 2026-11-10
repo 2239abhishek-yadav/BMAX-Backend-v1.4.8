@@ -396,7 +396,7 @@ router.put('/:firmId/modules/:moduleKey', (req: Request, res: Response) => {
     const now = new Date().toISOString();
     const { firmId, moduleKey } = req.params;
     const { multiSeriesEnabled, unitsEnabled, itemDiscountEnabled, billDiscountEnabled,
-      packingEnabled, batchEnabled, expiryEnabled, mfgDateEnabled, freeQuantityEnabled, mrpEnabled, sellingRateEnabled, purchaseRateEnabled, discountPercentageEnabled, discountAmountEnabled, unit1Enabled, unit2Enabled, hsnEnabled, serialNumberEnabled, itemNameEnabled, barcodeEnabled, accessionCodeEnabled, netAmountEnabled, netRateEnabled, gstPercentageEnabled, printBarcodeAfterPurchase, allowDuplicateItemCode, allowDuplicateItems, allowNegativeStock, gstPriceMode, barcodeBillingEnabled, lastFiveTransactionsEnabled, notesDescriptionEnabled, transactionSidebarCollapsed } = req.body;
+      packingEnabled, batchEnabled, expiryEnabled, mfgDateEnabled, freeQuantityEnabled, mrpEnabled, sellingRateEnabled, purchaseRateEnabled, discountPercentageEnabled, discountAmountEnabled, unit1Enabled, unit2Enabled, hsnEnabled, serialNumberEnabled, itemNameEnabled, barcodeEnabled, accessionCodeEnabled, netAmountEnabled, netRateEnabled, gstPercentageEnabled, printBarcodeAfterPurchase, allowDuplicateItemCode, allowDuplicateItems, allowNegativeStock, gstPriceMode, barcodeBillingEnabled, lastFiveTransactionsEnabled, notesDescriptionEnabled, transactionSidebarCollapsed, priceUnitBasisEnabled, priceUnitBasis } = req.body;
 
     // Retire legacy quantity/purchase-unit selector settings. The canonical model is Unit 1 + Unit 2.
     db.prepare("DELETE FROM firm_settings WHERE firmId = ? AND settingType = ? AND settingKey IN ('quantity1Enabled','quantity2Enabled','purchaseUnitMode','purchaseRateUnit')").run(firmId, moduleKey);
@@ -429,6 +429,11 @@ router.put('/:firmId/modules/:moduleKey', (req: Request, res: Response) => {
     if (printBarcodeAfterPurchase !== undefined && moduleKey === 'purchase_invoice') upsert('printBarcodeAfterPurchase', !!printBarcodeAfterPurchase);
     if (allowDuplicateItemCode !== undefined && moduleKey === 'items') upsert('allowDuplicateItemCode', !!allowDuplicateItemCode);
     if (allowDuplicateItems !== undefined && moduleKey === 'items') upsert('allowDuplicateItems', !!allowDuplicateItems);
+    if (priceUnitBasisEnabled !== undefined && moduleKey === 'items') upsert('priceUnitBasisEnabled', !!priceUnitBasisEnabled);
+    if (priceUnitBasis !== undefined && moduleKey === 'items') {
+      if (!['unit1','unit2'].includes(String(priceUnitBasis))) return res.status(400).json({ error: 'priceUnitBasis must be unit1 or unit2' });
+      upsert('priceUnitBasis', String(priceUnitBasis));
+    }
     if (barcodeBillingEnabled !== undefined && ['sale_invoice','pos_billing','counter_sale','sale_order','sale_return','sale_return_challan','sale_quotation','sale_proforma','delivery_challan','job_work_out','purchase_invoice','purchase_order','purchase_challan','purchase_return','purchase_return_challan','job_work_in'].includes(moduleKey)) upsert('barcodeBillingEnabled', !!barcodeBillingEnabled);
     if (lastFiveTransactionsEnabled !== undefined) upsert('lastFiveTransactionsEnabled', !!lastFiveTransactionsEnabled);
     if (notesDescriptionEnabled !== undefined) upsert('notesDescriptionEnabled', !!notesDescriptionEnabled);
