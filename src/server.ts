@@ -16,8 +16,10 @@ import { accessControl } from './middleware/access-control';
 import { previewAddonActivation, activateAddon } from './lib/subscription';
 
 import { phoneGuard } from './middleware/phone-guard';
+import { installSafeErrorResponses, safeErrorHandler } from './lib/safe-errors';
 
 const app = express();
+installSafeErrorResponses(app);
 const PORT = Number(process.env.PORT || 4100);
 
 // Middleware
@@ -37,7 +39,14 @@ app.use(phoneGuard);
 // Uploads directory
 const uploadDir = process.env.UPLOADS_DIR || path.join(process.env.DB_PATH || path.join(process.cwd(), 'data'), 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-app.use('/uploads', express.static(uploadDir));
+const isRenderService = process.env.RENDER === 'true' || Boolean(process.env.RENDER_SERVICE_ID);
+if (!isRenderService) {
+  // Local desktop attachments remain available only through the loopback backend.
+  app.use('/uploads', express.static(uploadDir));
+} else {
+  // The public central account service must not expose a filesystem upload folder.
+  app.use('/uploads', (_req, res) => res.status(404).json({ error: 'Not found' }));
+}
 
 // API Routes
 // Exact add-on activation endpoints are declared at server level as a hard
@@ -88,10 +97,10 @@ app.use('/subscription', subscriptionRouter);
 app.use('/activation', activationRouter);
 app.use('/addon', addonRouter);
 app.use('/addons', activationRouter);
-app.use('/api/profile', profileRouter);
 // Customer cloud backups are authorized by a short-lived Hostinger account session.
 app.use('/api/cloud-backup', cloudBackupRouter);
 app.use(accessControl);
+app.use('/api/profile', profileRouter);
 app.use('/api', router);
 
 
@@ -124,15 +133,12 @@ app.get('/__bmax/diagnostics', (_req: express.Request, res: express.Response) =>
 });
 
 // 404 handler
-app.use((req: express.Request, res: express.Response) => {
-  res.status(404).json({ error: 'Route not found' });
+app.use((_req: express.Request, res: express.Response) => {
+  res.status(404).json({ success: false, error: 'The requested operation is unavailable.', code: 'NOT_FOUND' });
 });
 
-// Error handler
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('[Error]', err);
-  res.status(err.status || 500).json({ error: err.message || 'Internal Server Error' });
-});
+// Final fail-closed handler: detailed diagnostics are server-side only.
+app.use(safeErrorHandler);
 
 // Initialize DB and start
 try {

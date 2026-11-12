@@ -1,8 +1,44 @@
 import { Request, Response, NextFunction } from 'express';
+import { createHash } from 'node:crypto';
 import { checkPermission } from '../routes/users.routes';
 import { db } from '../lib/db';
 import { getSubscriptionAccess } from '../lib/subscription';
 import { planTier, requiredTierForRoute } from '../lib/plan-entitlements';
+
+
+const isRenderService = process.env.RENDER === 'true' || Boolean(process.env.RENDER_SERVICE_ID);
+const verifiedSessionCache = new Map<string, { email: string; expiresAt: number }>();
+
+async function verifyHostingerSession(email: string, token: string, firmId: string): Promise<boolean> {
+  if (!/^[a-f0-9]{64}$/i.test(token) || !/^\S+@\S+\.\S+$/.test(email)) return false;
+  const endpoint = String(process.env.BMAX_PHP_ACCOUNT_API_URL || '').trim();
+  const apiToken = String(process.env.BMAX_PHP_ACCOUNT_API_TOKEN || '').trim();
+  if (!endpoint || !apiToken || !/^https:\/\//i.test(endpoint)) return false;
+  const cacheKey = createHash('sha256').update(`${token}:${firmId}`).digest('hex');
+  const cached = verifiedSessionCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now() && cached.email === email) return true;
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-bmax-api-token': apiToken },
+      body: JSON.stringify({ action: 'session_verify', accountSessionToken: token, email, ...(firmId ? { firmId } : {}) }),
+      signal: AbortSignal.timeout(8000),
+    });
+    const result: any = await response.json().catch(() => ({}));
+    const verifiedEmail = String(result?.data?.email || '').trim().toLowerCase();
+    if (!response.ok || result?.success !== true || verifiedEmail !== email) return false;
+    // Cache only a successful server validation for at most 10 seconds.
+    verifiedSessionCache.set(cacheKey, { email, expiresAt: Date.now() + 10_000 });
+    if (verifiedSessionCache.size > 5000) {
+      const now = Date.now();
+      for (const [key, value] of verifiedSessionCache) if (value.expiresAt <= now) verifiedSessionCache.delete(key);
+    }
+    return true;
+  } catch {
+    // Fail closed: never fall back to client-supplied identity headers on a network error.
+    return false;
+  }
+}
 
 function getFirmId(req:Request){
   // Express app-level middleware can run before nested router params are populated.
@@ -48,7 +84,7 @@ function moduleFor(path:string, body:any){
   }
   return map[p]||'';
 }
-export function accessControl(req:Request,res:Response,next:NextFunction){
+export async function accessControl(req:Request,res:Response,next:NextFunction){
   if(req.path.startsWith('/uploads') || req.path.startsWith('/api/subscription')) return next();
   // The recovery-workspace endpoint performs its own stronger authorization by
   // validating the signed-in account session against Render's central company
@@ -58,6 +94,19 @@ export function accessControl(req:Request,res:Response,next:NextFunction){
   const email=String(req.headers['x-bmax-user-email']||'').trim().toLowerCase();
   const firmId=getFirmId(req);
   const module=moduleFor(req.path,req.body);
+
+  // Render is internet-facing; email/firm headers are untrusted client input.
+  // Require Hostinger to validate the opaque account session and firm ownership
+  // before any business route can reach the central service's local database.
+  // The local Electron backend deliberately keeps its existing offline workflow.
+  if (isRenderService) {
+    const accountSession = String(req.headers['x-bmax-account-session'] || '').trim();
+    const verified = await verifyHostingerSession(email, accountSession, firmId);
+    if (!verified) return res.status(401).json({
+      error: 'A valid B-MAX account session is required for this service.',
+      code: 'CENTRAL_SESSION_REQUIRED',
+    });
+  }
   if(req.method==='GET' && (/^\/api\/import\/(items|parties)\/template$/.test(req.path) || req.path==='/api/bank-transactions/import-template')) return next();
 
   // Subscription expiry is intentionally TRANSACTION-ONLY. This check must
