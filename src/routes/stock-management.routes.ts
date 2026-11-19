@@ -258,7 +258,7 @@ router.get('/physical', (req: Request, res: Response) => {
     const sessions = db.prepare(`SELECT p.*,g.name godownName,(SELECT COUNT(*) FROM physical_stock_items pi WHERE pi.sessionId=p.id) lineCount
       FROM physical_stock_sessions p LEFT JOIN godowns g ON g.id=p.godownId WHERE p.firmId=? ORDER BY p.sessionDate DESC,p.createdAt DESC LIMIT 100`).all(firmId);
     res.json({ success: true, data: { rows, stores, selectedGodownId: godownId, sessions } });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  } catch (e: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.post('/physical', (req: Request, res: Response) => {
@@ -295,7 +295,7 @@ router.get('/physical/:id', (req: Request, res: Response) => {
     if (!h) return res.status(404).json({ error: 'Physical stock session not found' });
     h.items = db.prepare('SELECT pi.*,i.name itemName,i.itemCode,u.shortName unitName FROM physical_stock_items pi JOIN items i ON i.id=pi.itemId LEFT JOIN units u ON u.id=i.unitId WHERE pi.sessionId=? ORDER BY i.name').all(h.id);
     res.json({ success: true, data: h });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  } catch (e: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // ---------- Manufacturing / BOM ----------
@@ -323,7 +323,7 @@ router.get('/manufacturing/boms', (req: Request, res: Response) => {
     const byproductItems = db.prepare(`${itemSelect} AND i.itemRole IN ('FINISHED_GOOD','BY_PRODUCT','SEMI_FINISHED') ORDER BY i.name`).all(firmId);
     const stores = db.prepare("SELECT id,name,isDefault FROM godowns WHERE firmId=? AND COALESCE(isActive,1)=1 ORDER BY isDefault DESC,name").all(firmId);
     res.json({ success: true, data: { boms, items, rawItems, finishedItems, byproductItems, stores } });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  } catch (e: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.post('/manufacturing/boms', (req: Request, res: Response) => {
@@ -403,7 +403,7 @@ router.get('/manufacturing/entries', (req: Request, res: Response) => {
       r.byproducts = db.prepare(`SELECT mb.*,i.name itemName,u.shortName unitName FROM manufacturing_entry_byproducts mb JOIN items i ON i.id=mb.itemId LEFT JOIN units u ON u.id=i.unitId WHERE mb.entryId=? ORDER BY mb.createdAt`).all(r.id);
     }
     res.json({ success: true, data: rows });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  } catch (e: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.get('/manufacturing/entries/:id', (req: Request, res: Response) => {
@@ -415,7 +415,7 @@ router.get('/manufacturing/entries/:id', (req: Request, res: Response) => {
     entry.byproducts = db.prepare(`SELECT mb.*,i.name itemName,u.shortName unitName FROM manufacturing_entry_byproducts mb JOIN items i ON i.id=mb.itemId LEFT JOIN units u ON u.id=i.unitId WHERE mb.entryId=? ORDER BY mb.createdAt`).all(entry.id);
     entry.movements = db.prepare(`SELECT mm.*,i.name itemName,u.shortName unitName FROM manufacturing_movements mm LEFT JOIN items i ON i.id=mm.itemId LEFT JOIN units u ON u.id=i.unitId WHERE mm.entryId=? ORDER BY mm.createdAt`).all(entry.id);
     res.json({ success: true, data: entry });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  } catch (e: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.get('/manufacturing/movements', (req: Request, res: Response) => {
@@ -430,7 +430,7 @@ router.get('/manufacturing/movements', (req: Request, res: Response) => {
     if (type) { q += ' AND mm.movementType=?'; params.push(type); }
     q += ' ORDER BY mm.movementDate DESC,mm.createdAt DESC LIMIT 500';
     res.json({ success: true, data: db.prepare(q).all(...params) });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  } catch (e: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.post('/manufacturing/entries', (req: Request, res: Response) => {
@@ -600,7 +600,7 @@ router.get('/manufacturing/reports', (req: Request, res: Response) => {
       COALESCE(SUM(totalMaterialCost),0) materialCost,COALESCE(SUM(additionalCost),0) additionalCost,COALESCE(SUM(totalByproductValue),0) byproductValue,
       COALESCE(SUM(netProductionCost),0) netProductionCost FROM manufacturing_entries WHERE firmId=? AND status='posted'`).get(firmId);
     res.json({ success: true, data: { boms, entries, summary } });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  } catch (e: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 export default router;

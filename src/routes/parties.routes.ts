@@ -30,7 +30,7 @@ router.get('/', (req: Request, res: Response) => {
     q += ' ORDER BY p.name ASC';
     const parties = db.prepare(q).all(params);
     res.json({ success: true, data: parties });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.get('/cash-customer', (req: Request, res: Response) => {
@@ -39,7 +39,7 @@ router.get('/cash-customer', (req: Request, res: Response) => {
     if (!firmId) return res.status(400).json({ error: 'firmId required' });
     const party = ensureCashCustomer(firmId);
     res.json({ success: true, data: party });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 
@@ -207,7 +207,7 @@ router.get('/ledger-accounts', (req: Request, res: Response) => {
         {key:'sales_return',label:'Sales Return'}, {key:'purchase_return',label:'Purchase Return'}, {key:'other_income',label:'Other Income'}, {key:'duties_taxes',label:'Duties & Taxes'}
       ]
     }});
-  } catch (err:any) { res.status(500).json({ error: err.message }); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Unified ledger detail for non-party accounts. Party accounts continue to use
@@ -279,7 +279,7 @@ router.get('/ledger-account/:accountType/:accountId', (req: Request, res: Respon
       return res.json({success:true,data:{account:{id:accountId,name:found.name,classification:accountType==='employee'?'Employees / Staff':'Field Staff / Commission Agents',accountType},openingBalance:0,currentBalance:0,ledger:[]}});
     }
     return res.status(400).json({error:'Unsupported ledger account'});
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 router.get('/:id', (req: Request, res: Response) => {
@@ -305,7 +305,7 @@ router.get('/:id', (req: Request, res: Response) => {
     const advanceAvailable = Math.max(0, Number(advanceRow?.customerAdvance || 0));
     const supplierAdvanceAvailable = Math.max(0, Number(advanceRow?.supplierAdvance || 0));
     res.json({ success: true, data: { ...party as any, salesTotal, purchasesTotal, paymentsIn, paymentsOut, totalPaid: paymentsIn, advanceAvailable, supplierAdvanceAvailable } });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.post('/', (req: Request, res: Response) => {
@@ -336,7 +336,7 @@ router.post('/', (req: Request, res: Response) => {
 
     db.prepare('INSERT INTO parties (id, firmId, name, type, partyKind, partyCode, phone, email, gstin, pan, address, city, state, pincode, groupId, creditLimit, creditDays, openingBalance, openingBalanceType, isActive, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)').run(id, firmId, name, type, partyKind, partyCode, phone, email, gstin, pan, address, city, state, pincode, groupId, creditLimit, creditDays, openingBalance, openingBalanceType === 'credit' ? 'credit' : 'debit', now, now);
     res.status(201).json({ success: true, data: db.prepare('SELECT * FROM parties WHERE id = ?').get(id) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Set opening balance independently without requiring the full party payload.
@@ -350,7 +350,7 @@ router.put('/:id/opening-balance', (req: Request, res: Response) => {
     if (!party || party.firmId !== firmId) return res.status(404).json({ error: 'Party not found' });
     db.prepare('UPDATE parties SET openingBalance=?, openingBalanceType=?, updatedAt=? WHERE id=? AND firmId=?').run(openingBalance, openingBalanceType, new Date().toISOString(), req.params.id, firmId);
     res.json({ success:true, data: db.prepare('SELECT * FROM parties WHERE id=?').get(req.params.id) });
-  } catch (err:any) { res.status(500).json({ error: err.message }); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.put('/:id', (req: Request, res: Response) => {
@@ -372,14 +372,14 @@ router.put('/:id', (req: Request, res: Response) => {
 
     db.prepare('UPDATE parties SET name=?, type=?, partyKind=?, partyCode=?, phone=?, email=?, gstin=?, pan=?, address=?, city=?, state=?, pincode=?, groupId=?, creditLimit=?, creditDays=?, openingBalance=?, openingBalanceType=?, isActive=?, updatedAt=? WHERE id=?').run(name, type, partyKind, partyCode || null, phone, email, gstin, pan, address, city, state, pincode, groupId, creditLimit, creditDays, openingBalance, openingBalanceType==='credit'?'credit':'debit', isActive ? 1 : 0, now, req.params.id);
     res.json({ success: true, data: db.prepare('SELECT * FROM parties WHERE id = ?').get(req.params.id) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.delete('/:id', (req: Request, res: Response) => {
   try {
     db.prepare('UPDATE parties SET isActive = 0, updatedAt = ? WHERE id = ?').run(new Date().toISOString(), req.params.id);
     res.json({ success: true });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Party statement
@@ -394,7 +394,76 @@ router.get('/:id/statement', (req: Request, res: Response) => {
     const docs = db.prepare(q).all(params);
     const payments = db.prepare('SELECT * FROM payments WHERE partyId = ? AND COALESCE(isDeleted,0)=0 ORDER BY paymentDate ASC').all(req.params.id);
     res.json({ success: true, data: { documents: docs, payments } });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
+});
+
+// Dedicated recent transaction history for the billing panel. Keep this endpoint
+// independent from party summary/payment allocation queries so an unrelated
+// balance-query failure cannot hide saved invoices from LAST 5 TRANSACTIONS.
+router.get('/:id/recent-transactions', (req: Request, res: Response) => {
+  try {
+    const party = db.prepare('SELECT id, firmId, name FROM parties WHERE id = ?').get(req.params.id) as any;
+    if (!party) return res.status(404).json({ success: false, error: 'Party not found' });
+
+    // Older customer databases may be missing newer optional document columns.
+    // Build the projection from the actual SQLite schema instead of allowing an
+    // optional field to turn the whole history request into HTTP 500.
+    const documentColumns = new Set((db.prepare('PRAGMA table_info(documents)').all() as any[]).map(c => String(c.name)));
+    const required = ['id', 'firmId', 'documentType', 'documentDate', 'partyName'];
+    const missing = required.filter(c => !documentColumns.has(c));
+    if (missing.length) throw new Error(`Documents table is missing required columns: ${missing.join(', ')}`);
+
+    const fields = ['id','firmId','partyId','partyName','documentType','documentSubtype','documentNumber',
+      'documentDate','total','subtotal','discountAmount','taxAmount','roundOff','paidAmount','balanceAmount',
+      'status','transactionType','paymentType','dueDate','description','createdAt','updatedAt'];
+    const projection = fields.map(name => documentColumns.has(name)
+      ? `d."${name}" AS "${name}"`
+      : `NULL AS "${name}"`).join(', ');
+    const advanceProjection = `, CASE WHEN d.documentType IN ('sale_quotation','sale_order') THEN
+      COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.firmId=d.firmId AND p.partyId=d.partyId
+        AND p.type='payment_in' AND p.reference LIKE ('BMAX_QUOTE_ADVANCE:' || d.id || ':%') AND COALESCE(p.isDeleted,0)=0),0)
+      ELSE COALESCE(d.paidAmount,0) END AS advanceReceived,
+      CASE WHEN d.documentType IN ('sale_quotation','sale_order') THEN
+      MAX(0,COALESCE(d.total,0)-COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.firmId=d.firmId AND p.partyId=d.partyId
+        AND p.type='payment_in' AND p.reference LIKE ('BMAX_QUOTE_ADVANCE:' || d.id || ':%') AND COALESCE(p.isDeleted,0)=0),0))
+      ELSE COALESCE(d.balanceAmount,0) END AS remainingAmount`;
+    const predicates = ['d.firmId = ?'];
+    const params: any[] = [party.firmId];
+    if (documentColumns.has('isDeleted')) predicates.push('COALESCE(d.isDeleted,0) = 0');
+    if (documentColumns.has('status')) predicates.push("LOWER(COALESCE(d.status,'active')) NOT IN ('hold','draft','cancelled')");
+
+    const allowedTypes = ['sale_invoice','purchase_invoice','sale_return','purchase_return',
+      'sale_order','purchase_order','sale_quotation','delivery_challan','expense','other_income'];
+    predicates.push(`d.documentType IN (${allowedTypes.map(() => '?').join(',')})`);
+    params.push(...allowedTypes);
+
+    // Exact partyId is authoritative. For legacy rows with blank OR stale partyId,
+    // exact name recovery is allowed only when that name identifies one party in
+    // this firm. This recovers saved invoices without leaking another same-name party.
+    const nameMatch = `LOWER(TRIM(COALESCE(d.partyName,''))) = LOWER(TRIM(?))
+      AND (SELECT COUNT(*) FROM parties p2
+           WHERE p2.firmId = d.firmId
+             AND LOWER(TRIM(p2.name)) = LOWER(TRIM(d.partyName))) = 1`;
+    if (documentColumns.has('partyId')) {
+      predicates.push(`(d.partyId = ? OR (${nameMatch}))`);
+      params.push(req.params.id, party.name);
+    } else {
+      predicates.push(`(${nameMatch})`);
+      params.push(party.name);
+    }
+
+    const order = ['d.documentDate DESC'];
+    if (documentColumns.has('createdAt')) order.push("COALESCE(d.createdAt,'') DESC");
+    order.push('d.id DESC');
+    const recentTransactions = db.prepare(
+      `SELECT ${projection} ${advanceProjection} FROM documents d WHERE ${predicates.join(' AND ')} ORDER BY ${order.join(', ')} LIMIT 5`
+    ).all(...params);
+
+    return res.json({ success: true, data: { partyId: party.id, firmId: party.firmId, recentTransactions } });
+  } catch (err: any) {
+    console.error('[PartyRecentTransactions] Failed to load party history:', err?.message || err);
+    return res.status(500).json({ success: false, error: 'Unable to load party transactions', detail: 'The operation could not be completed.' });
+  }
 });
 
 // Party Ledger — opening balance + running balance across all documents & payments, bill-wise.
@@ -460,7 +529,7 @@ router.get('/:id/ledger', (req: Request, res: Response) => {
         ledger
       }
     });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 export default router;

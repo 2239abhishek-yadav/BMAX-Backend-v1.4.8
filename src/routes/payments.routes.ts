@@ -27,7 +27,7 @@ router.get('/', (req: Request, res: Response) => {
       }
     }
     res.json({ success: true, data: payments });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Unpaid/partially-paid bills for a party, to drive bill-wise Payment Out / Receipt selection.
@@ -44,7 +44,7 @@ router.get('/unpaid-bills', (req: Request, res: Response) => {
        ORDER BY documentDate ASC`
     ).all(firmId, partyId, documentType);
     res.json({ success: true, data: bills });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Recycle Bin: soft-deleted payment transactions
@@ -57,7 +57,7 @@ router.get('/recycle-bin', (req: Request, res: Response) => {
     if (search) { q += ` AND (partyName LIKE ? OR receiptNumber LIKE ? OR type LIKE ?)`; const x=`%${search}%`; params.push(x,x,x); }
     q += ' ORDER BY updatedAt DESC, paymentDate DESC';
     res.json({success:true,data:db.prepare(q).all(params)});
-  } catch (err:any) { res.status(500).json({error:err.message}); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.patch('/:id/trash', (req: Request, res: Response) => {
@@ -65,7 +65,7 @@ router.patch('/:id/trash', (req: Request, res: Response) => {
     const r=db.prepare('UPDATE payments SET isDeleted=1, updatedAt=? WHERE id=? AND firmId=?').run(new Date().toISOString(),req.params.id,req.body?.firmId || '');
     if (!r.changes) return res.status(404).json({error:'Payment not found'});
     res.json({success:true,message:'Payment moved to trash'});
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 router.patch('/:id/restore', (req: Request, res: Response) => {
@@ -82,7 +82,7 @@ router.patch('/:id/restore', (req: Request, res: Response) => {
     });
     run();
     res.json({success:true,data:db.prepare('SELECT * FROM payments WHERE id=?').get(req.params.id)});
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 router.get('/:id', (req: Request, res: Response) => {
@@ -97,7 +97,7 @@ router.get('/:id', (req: Request, res: Response) => {
       p.linkedDocumentNumber = (db.prepare('SELECT documentNumber FROM documents WHERE id = ? AND firmId = ?').get(p.linkedDocumentId, p.firmId) as any)?.documentNumber || null;
     }
     res.json({ success: true, data: p });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Create a Payment In (Receipt) or Payment Out, optionally allocated bill-wise against
@@ -152,7 +152,7 @@ router.post('/replace-pos', (req: Request, res: Response) => {
     });
     run();
     res.json({ success: true, data: created });
-  } catch (err:any) { res.status(500).json({ error: err.message }); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.post('/', (req: Request, res: Response) => {
@@ -240,7 +240,7 @@ router.post('/', (req: Request, res: Response) => {
     const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as any;
     payment.allocations = db.prepare('SELECT documentId, amount FROM payment_allocations WHERE paymentId = ?').all(id);
     res.status(201).json({ success: true, data: payment });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Non-financial edit only (financial fields are immutable — delete and re-create to change amount/allocations,
@@ -252,7 +252,7 @@ router.put('/:id', (req: Request, res: Response) => {
     db.prepare('UPDATE payments SET partyId=?, partyName=?, receiptNumber=?, paymentDate=?, reference=?, description=?, updatedAt=? WHERE id=?')
       .run(partyId, partyName, receiptNumber, paymentDate, reference, description, now, req.params.id);
     res.json({ success: true, data: db.prepare('SELECT * FROM payments WHERE id = ?').get(req.params.id) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.delete('/:id', (req: Request, res: Response) => {
@@ -273,7 +273,7 @@ router.delete('/:id', (req: Request, res: Response) => {
     run();
 
     res.json({ success: true });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 export default router;

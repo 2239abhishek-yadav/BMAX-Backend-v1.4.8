@@ -45,7 +45,7 @@ router.get('/barcode/resolve', (req: Request, res: Response) => {
       }
     });
   } catch (err:any) {
-    res.status(500).json({ error: err?.message || 'Barcode resolution failed' });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.' });
   }
 });
 
@@ -153,7 +153,7 @@ router.post('/validate-document', (req: Request, res: Response) => {
 
     return res.json({ success:true, data:{valid:true} });
   } catch (err:any) {
-    return res.status(500).json({ error: err?.message || 'Inventory validation failed' });
+    return res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.' });
   }
 });
 

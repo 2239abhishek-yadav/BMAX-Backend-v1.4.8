@@ -33,7 +33,7 @@ router.get('/changes',(req,res)=>{ if(!lanAuthorized(req)) return res.status(401
 router.post('/changes/import',(req,res)=>{ if(!lanAuthorized(req)) return res.status(401).json({error:'LAN authentication failed'}); const changes=Array.isArray(req.body?.changes)?req.body.changes:[]; res.json({data:importChanges(changes)}); });
 router.post('/changes/ack',(req,res)=>{ if(!lanAuthorized(req)) return res.status(401).json({error:'LAN authentication failed'}); const ids=Array.isArray(req.body?.changeIds)?req.body.changeIds:[]; markChangesSynced(ids); res.json({data:getSyncStats()}); });
 router.post('/lan/sync-now',async(req,res)=>{const peers=getLanPeers();const results=[];for(const peer of peers){try{results.push(await syncWithPeer(peer))}catch(e:any){results.push({peer:peer.deviceName,error:e.message})}}res.json({data:{results,stats:getSyncStats()}});});
-router.post('/sync-now',(req,res)=>{ try { const stats=syncLocalQueue(); res.json({data:stats}); } catch(e:any){res.status(500).json({error:e.message})} });
+router.post('/sync-now',(req,res)=>{ try { const stats=syncLocalQueue(); res.json({data:stats}); } catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })} });
 router.post('/conflicts/:id/resolve',(req,res)=>{
   const id=String(req.params.id); const resolution=String(req.body?.resolution||'PENDING');
   const c=db.prepare('SELECT * FROM sync_conflicts WHERE id=?').get(id) as any; if(!c)return res.status(404).json({error:'Conflict not found'});

@@ -212,7 +212,7 @@ router.get('/pending-references', (req: Request, res: Response) => {
     if(!firmId || !partyId || !kind) return res.status(400).json({error:'firmId, partyId and kind are required'});
     const docs=getPendingSourceDocuments(String(firmId),String(kind),String(partyId));
     res.json({success:true,data:docs,count:docs.length});
-  } catch(err:any){ res.status(500).json({error:err.message}); }
+  } catch(err:any){ res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // GET paginated documents
@@ -252,7 +252,7 @@ router.get('/', (req: Request, res: Response) => {
     const documents = db.prepare(query).all(...params);
     res.json({ success: true, data: documents, total: countResult?.total || 0 });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -286,7 +286,7 @@ router.get('/return-references', (req: Request, res: Response) => {
       if(remaining.length) out.push({...d,documentType:sourceType,items:remaining,returnableTotal:remaining.reduce((s:number,x:any)=>s+x.returnableQuantity,0)});
     }
     res.json({success:true,data:out});
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 // GET deleted documents for the Recycle Bin
@@ -298,7 +298,7 @@ router.get('/recycle-bin', (req: Request, res: Response) => {
     if(search){ q += ' AND (documentNumber LIKE ? OR partyName LIKE ? OR documentType LIKE ?)'; const x=`%${search}%`; p.push(x,x,x); }
     q += ' ORDER BY updatedAt DESC, documentDate DESC';
     res.json({success:true,data:db.prepare(q).all(...p)});
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 // Create a held sales invoice. HOLD is an operational draft: it stores the bill and
@@ -343,7 +343,7 @@ router.post('/hold', (req: Request, res: Response) => {
     }
     const doc=db.prepare('SELECT * FROM documents WHERE id=?').get(id) as any; const docItems=db.prepare('SELECT * FROM document_items WHERE documentId=?').all(id);
     res.status(201).json({success:true,data:{...doc,items:docItems}});
-  } catch(err:any){ console.error('[Documents] Hold error:',err); res.status(500).json({error:err.message}); }
+  } catch(err:any){ console.error('[Documents] Hold error:',err); res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // GET document by id with items
@@ -354,7 +354,7 @@ router.get('/:id/logs', (req: Request, res: Response) => {
     if(firmId && String(doc.firmId)!==firmId) return res.status(403).json({error:'Document does not belong to firm'});
     const rows:any[]=db.prepare('SELECT id,action,changesJson,note,actorId,actorName,createdAt FROM document_audit_logs WHERE documentId=? ORDER BY createdAt DESC').all(req.params.id);
     res.json({success:true,data:rows.map(r=>({...r,changes:(()=>{try{return JSON.parse(r.changesJson||'{}')}catch{return {}}})()}))});
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 router.get('/:id', (req: Request, res: Response) => {
@@ -390,7 +390,7 @@ router.get('/:id', (req: Request, res: Response) => {
     if (String(viewDoc.documentType)==='purchase_order' && String(viewDoc.documentSubtype||'')==='purchase_challan') viewDoc.documentType='purchase_challan';
     res.json({ success: true, data: viewDoc });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -948,7 +948,7 @@ router.post('/', (req: Request, res: Response) => {
     res.status(201).json({ success: true, data: { ...doc as any, items: docItems } });
   } catch (err: any) {
     console.error('[Documents] Create error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -1054,7 +1054,7 @@ router.post('/convert-pending-to-invoice', (req: Request, res: Response) => {
     })();
     const doc=db.prepare('SELECT * FROM documents WHERE id=?').get(result.id); const docItems=db.prepare('SELECT * FROM document_items WHERE documentId=?').all(result.id);
     res.status(201).json({success:true,data:{...doc as any,items:docItems}});
-  } catch(err:any){ console.error('[Documents] Conversion error:',err); res.status(500).json({error:err.message}); }
+  } catch(err:any){ console.error('[Documents] Conversion error:',err); res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Convert one saved Proforma Invoice into a real Sales Invoice.
@@ -1120,7 +1120,7 @@ router.post('/convert-proforma-to-invoice', (req: Request, res: Response) => {
     })();
     const doc=db.prepare('SELECT * FROM documents WHERE id=?').get(result); const items=db.prepare('SELECT * FROM document_items WHERE documentId=?').all(result);
     res.status(201).json({success:true,data:{...doc as any,items}});
-  } catch(err:any){ console.error('[Documents] Proforma conversion error:',err); res.status(500).json({error:err.message}); }
+  } catch(err:any){ console.error('[Documents] Proforma conversion error:',err); res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // PUT update document
@@ -1464,7 +1464,7 @@ router.put('/:id' , (req: Request, res: Response) => {
     const data = updateDocument();
     res.json({ success: true, data });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -1478,7 +1478,7 @@ router.patch('/:id/trash', (req: Request, res: Response) => {
     db.prepare('UPDATE documents SET isDeleted = 1, updatedAt = ? WHERE id = ? AND firmId = ?').run(new Date().toISOString(), req.params.id, firmId);
     writeDocumentAudit(req.params.id,firmId,'DELETED',oldDoc,oldItems,null,[],req,'Transaction deleted / moved to recycle bin');
     res.json({ success: true, message: 'Document trashed' });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // PATCH restore document
@@ -1487,7 +1487,7 @@ router.patch('/:id/restore', (req: Request, res: Response) => {
     db.prepare('UPDATE documents SET isDeleted = 0, updatedAt = ? WHERE id = ?').run(new Date().toISOString(), req.params.id);
     res.json({ success: true, message: 'Document restored' });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -1533,7 +1533,7 @@ router.get('/next-number/:type', (req: Request, res: Response) => {
     const num = firm.invoiceNumber || 1;
     res.json({ success: true, data: `${prefix}-${String(num).padStart(4, '0')}`, seriesId: null });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -1546,7 +1546,7 @@ router.delete('/:id', (req: Request, res: Response) => {
     if (!r.changes) return res.status(404).json({ error: 'Document not found' });
     res.json({ success: true, message: 'Document moved to recycle bin' });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 

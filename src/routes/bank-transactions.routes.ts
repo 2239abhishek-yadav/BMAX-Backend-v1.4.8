@@ -13,7 +13,7 @@ router.get('/', (req: Request, res: Response) => {
     const rows = db.prepare(`SELECT id, firmId, accountId, date, type, amount, description, reference, createdAt, updatedAt
       FROM bank_transactions WHERE firmId = ? AND accountId = ? ORDER BY date DESC, createdAt DESC`).all(String(firmId), String(accountId));
     res.json({ success: true, data: rows });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.post('/', (req: Request, res: Response) => {
@@ -35,7 +35,7 @@ router.post('/', (req: Request, res: Response) => {
     });
     tx();
     res.status(201).json({ success: true, data: db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(id) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 export default router;

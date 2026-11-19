@@ -72,7 +72,7 @@ router.get('/',(req:Request,res:Response)=>{
       WHERE t.firmId=? ORDER BY t.transferDate DESC,t.createdAt DESC`).all(firmId) as any[];
     for(const r of rows) r.items=db.prepare(`SELECT sti.*,i.name itemName,i.itemCode,COALESCE(u.shortName,u.name,'') unitName FROM stock_transfer_items sti JOIN items i ON i.id=sti.itemId LEFT JOIN units u ON u.id=i.unitId WHERE sti.transferId=? ORDER BY sti.createdAt`).all(r.id);
     res.json({success:true,data:rows});
-  }catch(e:any){res.status(500).json({error:e.message})}
+  }catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}
 });
 
 router.post('/',(req:Request,res:Response)=>{
@@ -117,7 +117,7 @@ router.post('/',(req:Request,res:Response)=>{
 });
 
 router.get('/batch-stock',(req:Request,res:Response)=>{
-  try{const {firmId,itemId,batchId}=req.query;if(!firmId||!itemId||!batchId)return res.status(400).json({error:'firmId, itemId and batchId required'});const rows=db.prepare(`SELECT bs.*,g.name godownName FROM inventory_batch_stock bs JOIN godowns g ON g.id=bs.godownId WHERE bs.firmId=? AND bs.itemId=? AND bs.batchId=? ORDER BY g.name`).all(firmId,itemId,batchId);res.json({success:true,data:rows});}catch(e:any){res.status(500).json({error:e.message})}
+  try{const {firmId,itemId,batchId}=req.query;if(!firmId||!itemId||!batchId)return res.status(400).json({error:'firmId, itemId and batchId required'});const rows=db.prepare(`SELECT bs.*,g.name godownName FROM inventory_batch_stock bs JOIN godowns g ON g.id=bs.godownId WHERE bs.firmId=? AND bs.itemId=? AND bs.batchId=? ORDER BY g.name`).all(firmId,itemId,batchId);res.json({success:true,data:rows});}catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}
 });
 
 export default router;

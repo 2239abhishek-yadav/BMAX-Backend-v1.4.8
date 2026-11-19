@@ -410,7 +410,7 @@ router.get('/dashboard', (req: Request, res: Response) => {
         profit: periodProfit
       }
     });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Dashboard drill-down details. All values are scoped to the same firm and period
@@ -547,7 +547,7 @@ router.get('/dashboard-details', (req: Request, res: Response) => {
     }
 
     return res.status(400).json({ error:'Unknown dashboard detail type' });
-  } catch (err:any) { res.status(500).json({ error: err.message }); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Top 5 Selling Items (by quantity sold, within the selected date range)
@@ -574,7 +574,7 @@ router.get('/top-items', (req: Request, res: Response) => {
 
     const ranked = (rows as any[]).map((r, i) => ({ rank: i + 1, ...r }));
     res.json({ success: true, data: ranked });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Top 5 Transactions (by total value, within the selected date range, across sale + purchase docs)
@@ -595,7 +595,7 @@ router.get('/top-transactions', (req: Request, res: Response) => {
 
     const ranked = (rows as any[]).map((r, i) => ({ rank: i + 1, ...r }));
     res.json({ success: true, data: ranked });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Top clients by sales value in the selected period
@@ -607,7 +607,7 @@ router.get('/top-clients', (req: Request, res: Response) => {
     const params:any[]=[firmId]; if(startDate&&endDate) params.push(startDate,endDate); params.push(Number(limit));
     const rows=db.prepare(`SELECT d.partyId, d.partyName, SUM(d.total) AS total, COUNT(*) AS invoiceCount FROM documents d WHERE d.firmId=? AND d.documentType='sale_invoice' AND d.isDeleted=0 AND d.status NOT IN ('hold','draft','cancelled') ${dateFilter} GROUP BY d.partyId,d.partyName ORDER BY total DESC LIMIT ?`).all(...params);
     res.json({success:true,data:rows});
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 // Profit & Loss
@@ -638,7 +638,7 @@ router.get('/profit-loss', (req: Request, res: Response) => {
       closingStock, indirectExpenses:Number(indirectExpenseLedgers||0), indirectIncomes:0, netProfit:Math.max(0,netProfit), netLoss:Math.max(0,-netProfit),
       profitBeforeTax:netProfit, expenses:Number(expenses||0), otherIncome:directIncome
     }});
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Profit & Loss drill-down: every visible P&L component resolves to its source rows.
@@ -668,7 +668,7 @@ router.get('/profit-loss/detail', (req: Request, res: Response) => {
     else if(c==='net_profit' || c==='net_loss') rows=db.prepare(`SELECT e.id,e.date documentDate,e.description,e.partyName,e.amount FROM expenses e WHERE e.firmId=? AND COALESCE(e.isDeleted,0)=0 AND e.date BETWEEN ? AND ? ORDER BY e.date,e.createdAt`).all(f,start,end) as any[];
     else return res.status(400).json({error:'Unknown P&L component'});
     res.json({success:true,component:c,data:rows});
-  } catch(err:any){ res.status(500).json({error:err.message}); }
+  } catch(err:any){ res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Stock Summary
@@ -691,7 +691,7 @@ router.get('/stock-summary', (req: Request, res: Response) => {
     }
     q += ' ORDER BY i.name';
     res.json({ success: true, data: db.prepare(q).all(p) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Sales Report
@@ -705,7 +705,7 @@ router.get('/sales', (req: Request, res: Response) => {
     if (partyId) { q += ' AND d.partyId = ?'; p.push(partyId); }
     q += ' ORDER BY d.documentDate DESC';
     res.json({ success: true, data: db.prepare(q).all(p) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Purchase Report
@@ -719,7 +719,7 @@ router.get('/purchases', (req: Request, res: Response) => {
     if (partyId) { q += ' AND partyId = ?'; p.push(partyId); }
     q += ' ORDER BY documentDate DESC';
     res.json({ success: true, data: db.prepare(q).all(p) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // GST Report (Tax Summary)
@@ -732,10 +732,10 @@ router.get('/gst', (req: Request, res: Response) => {
     if (endDate) { q += ' AND documentDate <= ?'; p.push(endDate); }
     q += ' GROUP BY documentType';
     res.json({ success: true, data: db.prepare(q).all(p) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
-router.get('/gst-tax-register',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;const rows=db.prepare(`SELECT d.documentDate,d.documentNumber,d.documentType,d.partyName,p.gstin partyGstin,d.taxAmount,d.total FROM documents d LEFT JOIN parties p ON p.id=d.partyId WHERE d.firmId=? AND d.isDeleted=0 AND d.status NOT IN ('cancelled','draft') AND d.documentDate BETWEEN ? AND ? ORDER BY d.documentDate,d.documentNumber`).all(firmId,startDate,endDate);res.json({success:true,data:rows})}catch(err:any){res.status(500).json({error:err.message})}});
+router.get('/gst-tax-register',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;const rows=db.prepare(`SELECT d.documentDate,d.documentNumber,d.documentType,d.partyName,p.gstin partyGstin,d.taxAmount,d.total FROM documents d LEFT JOIN parties p ON p.id=d.partyId WHERE d.firmId=? AND d.isDeleted=0 AND d.status NOT IN ('cancelled','draft') AND d.documentDate BETWEEN ? AND ? ORDER BY d.documentDate,d.documentNumber`).all(firmId,startDate,endDate);res.json({success:true,data:rows})}catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
 
 // GSTR-1 — outward supplies return (B2B, B2C Large, B2C Small, Credit Notes, HSN summary)
 router.get('/gstr1', (req: Request, res: Response) => {
@@ -743,16 +743,16 @@ router.get('/gstr1', (req: Request, res: Response) => {
     const { firmId, startDate, endDate } = req.query;
     if (!firmId || !startDate || !endDate) return res.status(400).json({ error: 'firmId, startDate and endDate required' });
     res.json({ success: true, data: computeGstr1(String(firmId), String(startDate), String(endDate)) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // GSTR-2 — inward supplies
-router.get('/gstr2',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;if(!firmId||!startDate||!endDate)return res.status(400).json({error:'firmId, startDate and endDate required'});res.json({success:true,data:computeGstr2(String(firmId),String(startDate),String(endDate))})}catch(err:any){res.status(500).json({error:err.message})}});
-router.get('/gstr2b-reconciliation',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;if(!firmId||!startDate||!endDate)return res.status(400).json({error:'firmId, startDate and endDate required'});res.json({success:true,data:computeGstReconciliation(String(firmId),String(startDate),String(endDate),'2B')})}catch(err:any){res.status(500).json({error:err.message})}});
-router.get('/gstr2a-reconciliation',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;if(!firmId||!startDate||!endDate)return res.status(400).json({error:'firmId, startDate and endDate required'});res.json({success:true,data:computeGstReconciliation(String(firmId),String(startDate),String(endDate),'2A')})}catch(err:any){res.status(500).json({error:err.message})}});
-router.get('/gstr9',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;if(!firmId||!startDate||!endDate)return res.status(400).json({error:'firmId, startDate and endDate required'});res.json({success:true,data:computeGstr9(String(firmId),String(startDate),String(endDate))})}catch(err:any){res.status(500).json({error:err.message})}});
-router.get('/gstr4',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;if(!firmId||!startDate||!endDate)return res.status(400).json({error:'firmId, startDate and endDate required'});res.json({success:true,data:computeGstr4(String(firmId),String(startDate),String(endDate))})}catch(err:any){res.status(500).json({error:err.message})}});
-router.get('/cmp08',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;if(!firmId||!startDate||!endDate)return res.status(400).json({error:'firmId, startDate and endDate required'});res.json({success:true,data:computeCompositionReturns(String(firmId),String(startDate),String(endDate))})}catch(err:any){res.status(500).json({error:err.message})}});
+router.get('/gstr2',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;if(!firmId||!startDate||!endDate)return res.status(400).json({error:'firmId, startDate and endDate required'});res.json({success:true,data:computeGstr2(String(firmId),String(startDate),String(endDate))})}catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
+router.get('/gstr2b-reconciliation',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;if(!firmId||!startDate||!endDate)return res.status(400).json({error:'firmId, startDate and endDate required'});res.json({success:true,data:computeGstReconciliation(String(firmId),String(startDate),String(endDate),'2B')})}catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
+router.get('/gstr2a-reconciliation',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;if(!firmId||!startDate||!endDate)return res.status(400).json({error:'firmId, startDate and endDate required'});res.json({success:true,data:computeGstReconciliation(String(firmId),String(startDate),String(endDate),'2A')})}catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
+router.get('/gstr9',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;if(!firmId||!startDate||!endDate)return res.status(400).json({error:'firmId, startDate and endDate required'});res.json({success:true,data:computeGstr9(String(firmId),String(startDate),String(endDate))})}catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
+router.get('/gstr4',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;if(!firmId||!startDate||!endDate)return res.status(400).json({error:'firmId, startDate and endDate required'});res.json({success:true,data:computeGstr4(String(firmId),String(startDate),String(endDate))})}catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
+router.get('/cmp08',(req:Request,res:Response)=>{try{const {firmId,startDate,endDate}=req.query;if(!firmId||!startDate||!endDate)return res.status(400).json({error:'firmId, startDate and endDate required'});res.json({success:true,data:computeCompositionReturns(String(firmId),String(startDate),String(endDate))})}catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
 
 // GSTR-3B — summary return (net outward tax vs input tax credit)
 router.get('/gstr3b', (req: Request, res: Response) => {
@@ -760,7 +760,7 @@ router.get('/gstr3b', (req: Request, res: Response) => {
     const { firmId, startDate, endDate } = req.query;
     if (!firmId || !startDate || !endDate) return res.status(400).json({ error: 'firmId, startDate and endDate required' });
     res.json({ success: true, data: computeGstr3b(String(firmId), String(startDate), String(endDate)) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 
@@ -1043,9 +1043,9 @@ function genericReport(firmId:string, reportId:string, q:any) {
   }
 }
 
-router.get('/catalog', (req:Request,res:Response)=>{try{const {firmId}=req.query;if(!firmId)return res.status(400).json({error:'firmId required'});res.json({success:true,data:{parties:db.prepare(`SELECT id,name,type FROM parties WHERE firmId=? AND isActive=1 ORDER BY name`).all(firmId),items:db.prepare(`SELECT id,name,categoryId FROM items WHERE firmId=? AND isActive=1 ORDER BY name`).all(firmId),categories:db.prepare(`SELECT id,name FROM categories WHERE firmId=? ORDER BY name`).all(firmId)}})}catch(err:any){res.status(500).json({error:err.message})}});
+router.get('/catalog', (req:Request,res:Response)=>{try{const {firmId}=req.query;if(!firmId)return res.status(400).json({error:'firmId required'});res.json({success:true,data:{parties:db.prepare(`SELECT id,name,type FROM parties WHERE firmId=? AND isActive=1 ORDER BY name`).all(firmId),items:db.prepare(`SELECT id,name,categoryId FROM items WHERE firmId=? AND isActive=1 ORDER BY name`).all(firmId),categories:db.prepare(`SELECT id,name FROM categories WHERE firmId=? ORDER BY name`).all(firmId)}})}catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
 
-router.get('/all/:reportId', (req:Request,res:Response)=>{try{const {firmId,...q}=req.query as any;if(!firmId)return res.status(400).json({error:'firmId required'});const reportId=String(req.params.reportId);if(!REPORT_LABELS[reportId] && !['gstr1','gstr2','gstr2a_recon','gstr2b_recon','gstr3b','gstr9','gstr4','cmp08','gst_register','gst_internal'].includes(reportId))return res.status(404).json({error:'Unknown report'});let data:any;if(reportId==='gstr1')data=computeGstr1(String(firmId),String(q.startDate),String(q.endDate));else if(reportId==='gstr2')data=computeGstr2(String(firmId),String(q.startDate),String(q.endDate));else if(reportId==='gstr2a_recon')data=computeGstReconciliation(String(firmId),String(q.startDate),String(q.endDate),'2A');else if(reportId==='gstr2b_recon')data=computeGstReconciliation(String(firmId),String(q.startDate),String(q.endDate),'2B');else if(reportId==='gstr3b')data=computeGstr3b(String(firmId),String(q.startDate),String(q.endDate));else if(reportId==='gstr9')data=computeGstr9(String(firmId),String(q.startDate),String(q.endDate));else if(reportId==='gstr4')data=computeGstr4(String(firmId),String(q.startDate),String(q.endDate));else if(reportId==='cmp08')data=computeCompositionReturns(String(firmId),String(q.startDate),String(q.endDate));else if(reportId==='gst_register')data=db.prepare(`SELECT d.documentDate,d.documentNumber,d.documentType,d.partyName,p.gstin partyGstin,d.subtotal,d.taxAmount,d.total,d.status FROM documents d LEFT JOIN parties p ON p.id=d.partyId WHERE d.firmId=? AND d.isDeleted=0 AND d.status NOT IN ('cancelled','draft') AND d.documentDate BETWEEN ? AND ? ${q.partyId?'AND d.partyId=?':''} ORDER BY d.documentDate,d.documentNumber`).all(firmId,q.startDate,q.endDate,...(q.partyId?[q.partyId]:[]));else if(reportId==='gst_internal')data=db.prepare(`SELECT documentType,COUNT(*) count,COALESCE(SUM(subtotal),0) taxableValue,COALESCE(SUM(taxAmount),0) totalTax,COALESCE(SUM(total),0) totalValue FROM documents WHERE firmId=? AND isDeleted=0 AND status NOT IN ('hold','draft','cancelled') AND documentDate BETWEEN ? AND ? GROUP BY documentType`).all(firmId,q.startDate,q.endDate);else data=genericReport(String(firmId),reportId,q);res.json({success:true,reportId,title:REPORT_LABELS[reportId]||reportId,data:Array.isArray(data)?data:[data]});}catch(err:any){res.status(500).json({error:err.message})}});
+router.get('/all/:reportId', (req:Request,res:Response)=>{try{const {firmId,...q}=req.query as any;if(!firmId)return res.status(400).json({error:'firmId required'});const reportId=String(req.params.reportId);if(!REPORT_LABELS[reportId] && !['gstr1','gstr2','gstr2a_recon','gstr2b_recon','gstr3b','gstr9','gstr4','cmp08','gst_register','gst_internal'].includes(reportId))return res.status(404).json({error:'Unknown report'});let data:any;if(reportId==='gstr1')data=computeGstr1(String(firmId),String(q.startDate),String(q.endDate));else if(reportId==='gstr2')data=computeGstr2(String(firmId),String(q.startDate),String(q.endDate));else if(reportId==='gstr2a_recon')data=computeGstReconciliation(String(firmId),String(q.startDate),String(q.endDate),'2A');else if(reportId==='gstr2b_recon')data=computeGstReconciliation(String(firmId),String(q.startDate),String(q.endDate),'2B');else if(reportId==='gstr3b')data=computeGstr3b(String(firmId),String(q.startDate),String(q.endDate));else if(reportId==='gstr9')data=computeGstr9(String(firmId),String(q.startDate),String(q.endDate));else if(reportId==='gstr4')data=computeGstr4(String(firmId),String(q.startDate),String(q.endDate));else if(reportId==='cmp08')data=computeCompositionReturns(String(firmId),String(q.startDate),String(q.endDate));else if(reportId==='gst_register')data=db.prepare(`SELECT d.documentDate,d.documentNumber,d.documentType,d.partyName,p.gstin partyGstin,d.subtotal,d.taxAmount,d.total,d.status FROM documents d LEFT JOIN parties p ON p.id=d.partyId WHERE d.firmId=? AND d.isDeleted=0 AND d.status NOT IN ('cancelled','draft') AND d.documentDate BETWEEN ? AND ? ${q.partyId?'AND d.partyId=?':''} ORDER BY d.documentDate,d.documentNumber`).all(firmId,q.startDate,q.endDate,...(q.partyId?[q.partyId]:[]));else if(reportId==='gst_internal')data=db.prepare(`SELECT documentType,COUNT(*) count,COALESCE(SUM(subtotal),0) taxableValue,COALESCE(SUM(taxAmount),0) totalTax,COALESCE(SUM(total),0) totalValue FROM documents WHERE firmId=? AND isDeleted=0 AND status NOT IN ('hold','draft','cancelled') AND documentDate BETWEEN ? AND ? GROUP BY documentType`).all(firmId,q.startDate,q.endDate);else data=genericReport(String(firmId),reportId,q);res.json({success:true,reportId,title:REPORT_LABELS[reportId]||reportId,data:Array.isArray(data)?data:[data]});}catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
 
 router.get('/dashboard-item-movement/export', (req: Request, res: Response) => {
   try {
@@ -1075,10 +1075,10 @@ router.get('/dashboard-item-movement/export', (req: Request, res: Response) => {
     const out=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
     res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition',`attachment; filename="${base}.xlsx"`); return res.send(out);
-  } catch(err:any){ return res.status(500).json({error:err.message}); }
+  } catch(err:any){ return res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
-router.get('/all/:reportId/export', (req:Request,res:Response)=>{try{const {firmId,...q}=req.query as any;if(!firmId)return res.status(400).json({error:'firmId required'});const reportId=String(req.params.reportId);let data:any;if(['gstr1','gstr2','gstr2a_recon','gstr2b_recon','gstr3b','gstr9','gstr4','cmp08'].includes(reportId)){const map:any={gstr1:()=>computeGstr1(String(firmId),String(q.startDate),String(q.endDate)),gstr2:()=>computeGstr2(String(firmId),String(q.startDate),String(q.endDate)),gstr2a_recon:()=>computeGstReconciliation(String(firmId),String(q.startDate),String(q.endDate),'2A'),gstr2b_recon:()=>computeGstReconciliation(String(firmId),String(q.startDate),String(q.endDate),'2B'),gstr3b:()=>computeGstr3b(String(firmId),String(q.startDate),String(q.endDate)),gstr9:()=>computeGstr9(String(firmId),String(q.startDate),String(q.endDate)),gstr4:()=>computeGstr4(String(firmId),String(q.startDate),String(q.endDate)),cmp08:()=>computeCompositionReturns(String(firmId),String(q.startDate),String(q.endDate))}; data=map[reportId]();} else if(reportId==='gst_register') data=db.prepare(`SELECT d.documentDate,d.documentNumber,d.documentType,d.partyName,p.gstin partyGstin,d.subtotal,d.taxAmount,d.total,d.status FROM documents d LEFT JOIN parties p ON p.id=d.partyId WHERE d.firmId=? AND d.isDeleted=0 AND d.status NOT IN ('cancelled','draft') AND d.documentDate BETWEEN ? AND ? ${q.partyId?'AND d.partyId=?':''} ORDER BY d.documentDate,d.documentNumber`).all(firmId,q.startDate,q.endDate,...(q.partyId?[q.partyId]:[])); else if(reportId==='gst_internal') data=db.prepare(`SELECT documentType,COUNT(*) count,COALESCE(SUM(subtotal),0) taxableValue,COALESCE(SUM(taxAmount),0) totalTax,COALESCE(SUM(total),0) totalValue FROM documents WHERE firmId=? AND isDeleted=0 AND status NOT IN ('hold','draft','cancelled') AND documentDate BETWEEN ? AND ? GROUP BY documentType`).all(firmId,q.startDate,q.endDate); else data=genericReport(String(firmId),reportId,q); if(!Array.isArray(data))data=[data]; const title=REPORT_LABELS[reportId]||reportId; const format=String(q.format||'xlsx'); const base=`${reportId}_${q.startDate||'start'}_to_${q.endDate||'end'}`; if(format==='pdf'){const doc:any=new jsPDF({orientation:'landscape'});doc.setFontSize(16);doc.text(title,14,14);doc.setFontSize(9);doc.text(`${q.startDate||''} to ${q.endDate||''}`,14,20);const rows=data.slice(0,500);const cols=Object.keys(rows[0]||{Note:'No records'}).slice(0,12);const body=rows.map((r:any)=>cols.map(c=>String(r[c]??'')));(doc as any).autoTable({head:[cols.map(c=>c.replace(/([A-Z])/g,' $1'))],body,startY:25,styles:{fontSize:7,cellPadding:2},headStyles:{fontSize:7}});const buf=Buffer.from(doc.output('arraybuffer'));res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`attachment; filename="${base}.pdf"`);return res.send(buf);} const wb=XLSX.utils.book_new();const rows=data.length?data:[{Note:'No records found for selected filters.'}];XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),'Report');const out=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition',`attachment; filename="${base}.xlsx"`);return res.send(out);}catch(err:any){res.status(500).json({error:err.message})}});
+router.get('/all/:reportId/export', (req:Request,res:Response)=>{try{const {firmId,...q}=req.query as any;if(!firmId)return res.status(400).json({error:'firmId required'});const reportId=String(req.params.reportId);let data:any;if(['gstr1','gstr2','gstr2a_recon','gstr2b_recon','gstr3b','gstr9','gstr4','cmp08'].includes(reportId)){const map:any={gstr1:()=>computeGstr1(String(firmId),String(q.startDate),String(q.endDate)),gstr2:()=>computeGstr2(String(firmId),String(q.startDate),String(q.endDate)),gstr2a_recon:()=>computeGstReconciliation(String(firmId),String(q.startDate),String(q.endDate),'2A'),gstr2b_recon:()=>computeGstReconciliation(String(firmId),String(q.startDate),String(q.endDate),'2B'),gstr3b:()=>computeGstr3b(String(firmId),String(q.startDate),String(q.endDate)),gstr9:()=>computeGstr9(String(firmId),String(q.startDate),String(q.endDate)),gstr4:()=>computeGstr4(String(firmId),String(q.startDate),String(q.endDate)),cmp08:()=>computeCompositionReturns(String(firmId),String(q.startDate),String(q.endDate))}; data=map[reportId]();} else if(reportId==='gst_register') data=db.prepare(`SELECT d.documentDate,d.documentNumber,d.documentType,d.partyName,p.gstin partyGstin,d.subtotal,d.taxAmount,d.total,d.status FROM documents d LEFT JOIN parties p ON p.id=d.partyId WHERE d.firmId=? AND d.isDeleted=0 AND d.status NOT IN ('cancelled','draft') AND d.documentDate BETWEEN ? AND ? ${q.partyId?'AND d.partyId=?':''} ORDER BY d.documentDate,d.documentNumber`).all(firmId,q.startDate,q.endDate,...(q.partyId?[q.partyId]:[])); else if(reportId==='gst_internal') data=db.prepare(`SELECT documentType,COUNT(*) count,COALESCE(SUM(subtotal),0) taxableValue,COALESCE(SUM(taxAmount),0) totalTax,COALESCE(SUM(total),0) totalValue FROM documents WHERE firmId=? AND isDeleted=0 AND status NOT IN ('hold','draft','cancelled') AND documentDate BETWEEN ? AND ? GROUP BY documentType`).all(firmId,q.startDate,q.endDate); else data=genericReport(String(firmId),reportId,q); if(!Array.isArray(data))data=[data]; const title=REPORT_LABELS[reportId]||reportId; const format=String(q.format||'xlsx'); const base=`${reportId}_${q.startDate||'start'}_to_${q.endDate||'end'}`; if(format==='pdf'){const doc:any=new jsPDF({orientation:'landscape'});doc.setFontSize(16);doc.text(title,14,14);doc.setFontSize(9);doc.text(`${q.startDate||''} to ${q.endDate||''}`,14,20);const rows=data.slice(0,500);const cols=Object.keys(rows[0]||{Note:'No records'}).slice(0,12);const body=rows.map((r:any)=>cols.map(c=>String(r[c]??'')));(doc as any).autoTable({head:[cols.map(c=>c.replace(/([A-Z])/g,' $1'))],body,startY:25,styles:{fontSize:7,cellPadding:2},headStyles:{fontSize:7}});const buf=Buffer.from(doc.output('arraybuffer'));res.setHeader('Content-Type','application/pdf');res.setHeader('Content-Disposition',`attachment; filename="${base}.pdf"`);return res.send(buf);} const wb=XLSX.utils.book_new();const rows=data.length?data:[{Note:'No records found for selected filters.'}];XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),'Report');const out=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition',`attachment; filename="${base}.xlsx"`);return res.send(out);}catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
 
 // Sheet helper: XLSX chokes on a truly empty json_to_sheet() in some versions,
 // so an empty section still gets a one-row placeholder instead of no sheet at all.
@@ -1125,7 +1125,7 @@ router.get('/gstr1/export', (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filenameBase}.xlsx"`);
     res.send(buf);
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // GSTR-3B export — Excel (one sheet, table 3.1 / 4 / 6.1) or JSON (raw computed data)
@@ -1164,7 +1164,7 @@ router.get('/gstr3b/export', (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filenameBase}.xlsx"`);
     res.send(buf);
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Party Outstanding Report — one canonical ledger engine for Receivables and Payables.
@@ -1237,7 +1237,7 @@ router.get('/party-outstanding', (req: Request, res: Response) => {
     return res.json({success:true,data:{rows,totals}});
   } catch(err:any){
     console.error('[OutstandingReport] failed:',err);
-    return res.status(500).json({error:err?.message||'Unable to load outstanding report'});
+    return res.status(500).json({error:'An unexpected error occurred. Please try again or contact B-MAX support.'});
   }
 });
 
@@ -1250,7 +1250,7 @@ router.get('/day-book', (req: Request, res: Response) => {
     const end=String(endDate||date||start);
     const data=genericReport(String(firmId),'day_book',{startDate:start,endDate:end});
     res.json({ success: true, data });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 export default router;

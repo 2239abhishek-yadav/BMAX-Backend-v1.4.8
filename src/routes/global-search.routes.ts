@@ -21,7 +21,7 @@ router.get('/', (req: Request, res: Response) => {
     const seen = new Set<string>();
     const data = out.filter(x => { const k=`${x.type}:${x.id}`; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,40);
     res.json({ success:true, data });
-  } catch (err:any) { res.status(500).json({ error: err.message }); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 export default router;

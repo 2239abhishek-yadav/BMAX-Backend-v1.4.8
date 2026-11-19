@@ -54,7 +54,7 @@ router.get('/', (req:Request,res:Response)=>{
     const rows:any[]=db.prepare(q).all(p) as any[];
     for(const r of rows){ r.lines=db.prepare('SELECT * FROM job_work_lines WHERE orderId=? ORDER BY createdAt').all(r.id); }
     res.json({success:true,data:rows});
-  }catch(e:any){res.status(500).json({error:e.message})}
+  }catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}
 });
 
 router.post('/',(req:Request,res:Response)=>{
@@ -115,7 +115,7 @@ router.post('/:id/movement',(req:Request,res:Response)=>{
 });
 
 router.get('/:id',(req:Request,res:Response)=>{
-  try{const data:any=db.prepare('SELECT * FROM job_work_orders WHERE id=?').get(req.params.id);if(!data)return res.status(404).json({error:'Job work order not found'});data.lines=db.prepare('SELECT * FROM job_work_lines WHERE orderId=?').all(data.id);data.movements=db.prepare('SELECT * FROM job_work_movements WHERE orderId=? ORDER BY createdAt DESC').all(data.id);res.json({success:true,data})}catch(e:any){res.status(500).json({error:e.message})}
+  try{const data:any=db.prepare('SELECT * FROM job_work_orders WHERE id=?').get(req.params.id);if(!data)return res.status(404).json({error:'Job work order not found'});data.lines=db.prepare('SELECT * FROM job_work_lines WHERE orderId=?').all(data.id);data.movements=db.prepare('SELECT * FROM job_work_movements WHERE orderId=? ORDER BY createdAt DESC').all(data.id);res.json({success:true,data})}catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}
 });
 
 export default router;

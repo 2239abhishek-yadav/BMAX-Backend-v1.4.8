@@ -17,7 +17,7 @@ router.get('/', (req: Request, res: Response) => {
     if (search) { q += ' AND COALESCE(b.batchNumber,\'\') LIKE ?'; params.push(`%${search}%`); }
     q += ' ORDER BY CASE WHEN b.expiryYear IS NULL OR b.expiryMonth IS NULL THEN 1 ELSE 0 END, b.expiryYear ASC, b.expiryMonth ASC, b.updatedAt DESC';
     res.json({ success:true, data: db.prepare(q).all(params) });
-  } catch(e:any) { res.status(500).json({error:e.message}); }
+  } catch(e:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.get('/report', (req: Request, res: Response) => {
@@ -49,7 +49,7 @@ router.get('/report', (req: Request, res: Response) => {
     }
     q+=' ORDER BY i.name,CASE WHEN b.expiryYear IS NULL OR b.expiryMonth IS NULL THEN 1 ELSE 0 END,b.expiryYear,b.expiryMonth,b.batchNumber';
     const rows:any[]=db.prepare(q).all(p); res.json({success:true,data:rows.map(r=>({...r,expiryDate:null,expiryDisplay:expiryDisplay(r.expiryMonth,r.expiryYear)}))});
-  } catch(e:any){res.status(500).json({error:e.message})}
+  } catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}
 });
 
 router.get('/:id/transactions', (req: Request, res: Response) => {
@@ -101,7 +101,7 @@ router.get('/:id/transactions', (req: Request, res: Response) => {
     else if(purchaseSources.length){ originType='PURCHASE'; originLabel='Purchased'; originRef=purchaseSources[0].documentNumber; originDate=purchaseSources[0].documentDate; }
     else if(saleSources.length){ originType='SALE'; originLabel='Sale transaction'; originRef=saleSources[0].documentNumber; originDate=saleSources[0].documentDate; }
     res.json({success:true,data:{batch:{...b,expiryDate:null,expiryDisplay:expiryDisplay(b.expiryMonth,b.expiryYear)},origin:{type:originType,label:originLabel,reference:originRef,date:originDate},transactions:transactions.map((r:any)=>({...r,expiryDate:null,expiryDisplay:expiryDisplay(r.expiryMonth,r.expiryYear)}))}});
-  } catch(e:any){res.status(500).json({error:e.message})}
+  } catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}
 });
 
 // Exact batch lookup used by purchase entry to restore saved batch metadata
@@ -114,7 +114,7 @@ router.get('/lookup', (req: Request, res: Response) => {
       WHERE b.firmId=? AND b.itemId=? AND b.batchNumber=? LIMIT 1`).get(String(firmId),String(itemId),String(batchNumber).trim());
     if (!b) return res.status(404).json({error:'Batch not found'});
     res.json({success:true,data:{...b,expiryDate:null,expiryDisplay:expiryDisplay(b.expiryMonth,b.expiryYear),mfgDate:b.mfgDate||null,mfgDisplay:b.mfgDate||null}});
-  } catch(e:any) { res.status(500).json({error:e.message}); }
+  } catch(e:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.post('/', (req: Request, res: Response) => {
@@ -179,7 +179,7 @@ router.post('/', (req: Request, res: Response) => {
     });
     const saved:any=saveBatch();
     res.status(201).json({success:true,data:{...saved,expiryDate:null,expiryDisplay:expiryDisplay(saved.expiryMonth,saved.expiryYear)}});
-  }catch(e:any){res.status(500).json({error:e.message})}
+  }catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}
 });
 
 
@@ -214,7 +214,7 @@ router.delete('/:id', (req: Request, res: Response) => {
 
     db.prepare('DELETE FROM inventory_batches WHERE id=? AND firmId=?').run(batch.id,firmId);
     res.json({success:true,message:'Batch deleted'});
-  } catch(e:any) { res.status(500).json({error:e.message}); }
+  } catch(e:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 export default router;

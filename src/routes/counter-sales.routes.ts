@@ -118,7 +118,7 @@ router.get('/', (req:Request,res:Response)=>{
     const itemsStmt=db.prepare('SELECT * FROM counter_sale_items WHERE counterSaleId=? ORDER BY createdAt ASC');
     const data=rows.map(r=>({...r,items:itemsStmt.all(r.id)}));
     res.json({success:true,data,total:data.length});
-  }catch(e:any){res.status(500).json({error:e.message})}
+  }catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}
 });
 
 router.post('/', (req:Request,res:Response)=>{
@@ -181,7 +181,7 @@ router.get('/:id', (req:Request,res:Response)=>{
     if(!row) return res.status(404).json({error:'Counter sale not found'});
     const items:any[]=db.prepare('SELECT * FROM counter_sale_items WHERE counterSaleId=? AND firmId=? ORDER BY createdAt').all(id,firmId);
     res.json({success:true,data:{...row,items}});
-  }catch(e:any){res.status(500).json({error:e.message});}
+  }catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 router.post('/:id/reserve', (req:Request,res:Response)=>{

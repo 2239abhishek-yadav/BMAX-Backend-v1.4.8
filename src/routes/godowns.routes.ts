@@ -28,7 +28,7 @@ router.get('/', (req: Request, res: Response) => {
       data = primary ? [primary] : [];
     }
     res.json({ success: true, data });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.get('/:id/stock', (req: Request, res: Response) => {
@@ -42,7 +42,7 @@ router.get('/:id/stock', (req: Request, res: Response) => {
       ORDER BY i.name
     `).all([req.query.firmId, req.params.id]);
     res.json({ success: true, data });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.post('/', (req: Request, res: Response) => {
@@ -65,7 +65,7 @@ router.post('/', (req: Request, res: Response) => {
     });
     tx();
     res.status(201).json({ success:true, data: db.prepare('SELECT * FROM godowns WHERE id=?').get(id) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.put('/:id', (req: Request, res: Response) => {
@@ -82,7 +82,7 @@ router.put('/:id', (req: Request, res: Response) => {
         .run(safeName,address||null,contactPerson||null,phone||null,isDefault?1:0,new Date().toISOString(),req.params.id,firmId);
     }); tx();
     res.json({ success:true, data:db.prepare('SELECT * FROM godowns WHERE id=?').get(req.params.id) });
-  } catch (err:any) { res.status(500).json({error:err.message}); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.post('/:id/default', (req: Request, res: Response) => {
@@ -92,7 +92,7 @@ router.post('/:id/default', (req: Request, res: Response) => {
     if(!exists) return res.status(404).json({error:'Store not found'});
     const tx=db.transaction(()=>{ db.prepare('UPDATE godowns SET isDefault=0 WHERE firmId=?').run(firmId); db.prepare('UPDATE godowns SET isDefault=1,updatedAt=? WHERE id=? AND firmId=?').run(new Date().toISOString(),req.params.id,firmId); }); tx();
     res.json({success:true});
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 router.delete('/:id', (req: Request, res: Response) => {
@@ -106,7 +106,7 @@ router.delete('/:id', (req: Request, res: Response) => {
     if(Number(stock?.qty||0)>0) return res.status(409).json({error:'This store has stock. Transfer/clear its stock before deleting the store.'});
     db.prepare('UPDATE godowns SET isActive=0,isDefault=0,updatedAt=? WHERE id=? AND firmId=?').run(new Date().toISOString(),req.params.id,firmId);
     res.json({success:true});
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 export default router;

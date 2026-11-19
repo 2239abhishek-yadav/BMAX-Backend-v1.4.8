@@ -29,7 +29,7 @@ router.get('/:firmId/theme', (req: Request, res: Response) => {
     const enabled = cfg.enabled === undefined ? true : String(cfg.enabled) !== 'false';
     res.json({ success: true, data: { mode, enabled, modes: THEME_MODES } });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -55,7 +55,7 @@ router.put('/:firmId/theme', (req: Request, res: Response) => {
     upsert('enabled', enabled ? 'true' : 'false');
     res.json({ success: true, data: { mode, enabled, modes: THEME_MODES } });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -69,7 +69,7 @@ router.get('/:firmId', (req: Request, res: Response) => {
       obj[s.settingType][s.settingKey] = s.settingValue;
     }
     res.json({ success: true, data: obj });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // PUT update general settings
@@ -104,7 +104,7 @@ router.put('/:firmId', (req: Request, res: Response) => {
       }
     }
     res.json({ success: true, data: { inventory_global: { allowNegativeStock: getNegativeStockAllowed(req.params.firmId) } } });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 
@@ -118,7 +118,7 @@ router.get('/:firmId/ai', (req: Request, res: Response) => {
     // Remove obsolete cloud-AI credentials/configuration from earlier versions.
     db.prepare("DELETE FROM firm_settings WHERE firmId = ? AND settingType = 'ai' AND settingKey IN ('apiKey','provider','model')").run(req.params.firmId);
     res.json({ success:true, data:{ enabled: cfg.enabled === undefined ? true : String(cfg.enabled) !== 'false', engine:'tesseract.js-local' } });
-  } catch (err:any) { res.status(500).json({ error:err.message }); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.put('/:firmId/ai', (req: Request, res: Response) => {
@@ -132,7 +132,7 @@ router.put('/:firmId/ai', (req: Request, res: Response) => {
     // Delete legacy cloud provider settings and any previously saved API key.
     db.prepare("DELETE FROM firm_settings WHERE firmId = ? AND settingType = 'ai' AND settingKey IN ('apiKey','provider','model')").run(firmId);
     res.json({ success:true, data:{ enabled, engine:'tesseract.js-local' } });
-  } catch (err:any) { res.status(500).json({ error:err.message }); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // Persist first-time AI item-name mappings per firm. The source name is normalized
@@ -143,7 +143,7 @@ router.get('/:firmId/ai/item-mappings', (req: Request, res: Response) => {
     const data:any = {};
     for (const r of rows) data[r.settingKey] = r.settingValue;
     res.json({success:true,data});
-  } catch (err:any) { res.status(500).json({error:err.message}); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.post('/:firmId/ai/item-mapping', (req: Request, res: Response) => {
@@ -156,7 +156,7 @@ router.post('/:firmId/ai/item-mapping', (req: Request, res: Response) => {
     if (existing) db.prepare("UPDATE firm_settings SET settingValue = ?, updatedAt = ? WHERE firmId = ? AND settingType = 'ai_item_mapping' AND settingKey = ?").run(itemId,new Date().toISOString(),req.params.firmId,key);
     else db.prepare("INSERT INTO firm_settings (id, firmId, settingType, settingKey, settingValue, updatedAt) VALUES (?, ?, 'ai_item_mapping', ?, ?, ?)").run(uuidv4(),req.params.firmId,key,itemId,new Date().toISOString());
     res.json({success:true,data:{sourceName,itemId}});
-  } catch (err:any) { res.status(500).json({error:err.message}); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 
@@ -259,7 +259,7 @@ router.get('/:firmId/transaction-templates', (req: Request, res: Response) => {
     let data:any = {};
     try { data = row?.settingValue ? JSON.parse(String(row.settingValue)) : {}; } catch { data = {}; }
     res.json({ success:true, data });
-  } catch (err:any) { res.status(500).json({ error: err.message }); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.put('/:firmId/transaction-templates', (req: Request, res: Response) => {
@@ -323,7 +323,7 @@ router.get('/:firmId/transaction-templates/:transactionType/:formatId', (req: Re
     const raw = cfg?.designs?.[transactionType]?.[formatId];
     const design = raw ? cleanTemplateDesign(raw, formatId) : null;
     res.json({success:true,data:{firmId,transactionType,formatId,design,enabled:cfg?.enabled?.[transactionType]?.[formatId] !== false,isDefault:cfg?.defaults?.[transactionType] === formatId}});
-  } catch (err:any) { res.status(500).json({error:err.message}); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.put('/:firmId/transaction-templates/:transactionType/:formatId', (req: Request, res: Response) => {
@@ -358,7 +358,7 @@ router.get('/:firmId/transaction-templates/:transactionType/:formatId/context', 
     const banks:any[] = db.prepare('SELECT id, accountName, bankName, accountNumber, ifscCode, branchName, upiId, isActive FROM bank_accounts WHERE firmId = ? AND isActive = 1 ORDER BY accountName').all(firmId) as any[];
     const defaultBank = banks.find(b=>String(b?.upiId||'').trim()) || banks[0] || null;
     res.json({success:true,data:{firmId,transactionType,formatId,design,firm:firm||null,banks,defaultBank,enabled:cfg?.enabled?.[transactionType]?.[formatId] !== false,isDefault:cfg?.defaults?.[transactionType] === formatId}});
-  } catch (err:any) { res.status(500).json({error:err.message}); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.get('/:firmId/transaction-templates/qr', async (req: Request, res: Response) => {
@@ -381,13 +381,13 @@ router.get('/:firmId/transaction-templates/qr', async (req: Request, res: Respon
 // GET all module feature settings at once
 router.get('/:firmId/modules', (req: Request, res: Response) => {
   try { res.json({ success: true, data: getAllModuleSettings(req.params.firmId) }); }
-  catch (err: any) { res.status(500).json({ error: err.message }); }
+  catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // GET a single module's feature settings
 router.get('/:firmId/modules/:moduleKey', (req: Request, res: Response) => {
   try { res.json({ success: true, data: getModuleSettings(req.params.firmId, req.params.moduleKey) }); }
-  catch (err: any) { res.status(500).json({ error: err.message }); }
+  catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // PUT toggle a module's feature settings
@@ -396,7 +396,7 @@ router.put('/:firmId/modules/:moduleKey', (req: Request, res: Response) => {
     const now = new Date().toISOString();
     const { firmId, moduleKey } = req.params;
     const { multiSeriesEnabled, unitsEnabled, itemDiscountEnabled, billDiscountEnabled,
-      packingEnabled, batchEnabled, expiryEnabled, mfgDateEnabled, freeQuantityEnabled, mrpEnabled, sellingRateEnabled, purchaseRateEnabled, discountPercentageEnabled, discountAmountEnabled, unit1Enabled, unit2Enabled, hsnEnabled, serialNumberEnabled, itemNameEnabled, barcodeEnabled, accessionCodeEnabled, netAmountEnabled, netRateEnabled, gstPercentageEnabled, printBarcodeAfterPurchase, allowDuplicateItemCode, allowDuplicateItems, allowNegativeStock, gstPriceMode, barcodeBillingEnabled, lastFiveTransactionsEnabled, notesDescriptionEnabled, transactionSidebarCollapsed, priceUnitBasisEnabled, priceUnitBasis } = req.body;
+      packingEnabled, batchEnabled, expiryEnabled, mfgDateEnabled, freeQuantityEnabled, mrpEnabled, sellingRateEnabled, purchaseRateEnabled, discountPercentageEnabled, discountAmountEnabled, unit1Enabled, unit2Enabled, hsnEnabled, serialNumberEnabled, itemNameEnabled, barcodeEnabled, netAmountEnabled, netRateEnabled, gstPercentageEnabled, printBarcodeAfterPurchase, allowDuplicateItemCode, allowDuplicateItems, allowDuplicateBarcode, allowNegativeStock, gstPriceMode, barcodeBillingEnabled, lastFiveTransactionsEnabled, notesDescriptionEnabled, transactionSidebarCollapsed, priceUnitBasisEnabled, priceUnitBasis } = req.body;
 
     // Retire legacy quantity/purchase-unit selector settings. The canonical model is Unit 1 + Unit 2.
     db.prepare("DELETE FROM firm_settings WHERE firmId = ? AND settingType = ? AND settingKey IN ('quantity1Enabled','quantity2Enabled','purchaseUnitMode','purchaseRateUnit')").run(firmId, moduleKey);
@@ -422,13 +422,13 @@ router.put('/:firmId/modules/:moduleKey', (req: Request, res: Response) => {
     if (serialNumberEnabled !== undefined) upsert('serialNumberEnabled', !!serialNumberEnabled);
     if (itemNameEnabled !== undefined) upsert('itemNameEnabled', !!itemNameEnabled);
     if (barcodeEnabled !== undefined) upsert('barcodeEnabled', !!barcodeEnabled);
-    if (accessionCodeEnabled !== undefined) upsert('accessionCodeEnabled', !!accessionCodeEnabled);
     if (netAmountEnabled !== undefined) upsert('netAmountEnabled', !!netAmountEnabled);
     if (netRateEnabled !== undefined) upsert('netRateEnabled', !!netRateEnabled);
     if (gstPercentageEnabled !== undefined) upsert('gstPercentageEnabled', !!gstPercentageEnabled);
     if (printBarcodeAfterPurchase !== undefined && moduleKey === 'purchase_invoice') upsert('printBarcodeAfterPurchase', !!printBarcodeAfterPurchase);
     if (allowDuplicateItemCode !== undefined && moduleKey === 'items') upsert('allowDuplicateItemCode', !!allowDuplicateItemCode);
     if (allowDuplicateItems !== undefined && moduleKey === 'items') upsert('allowDuplicateItems', !!allowDuplicateItems);
+    if (allowDuplicateBarcode !== undefined && moduleKey === 'items') upsert('allowDuplicateBarcode', !!allowDuplicateBarcode);
     if (priceUnitBasisEnabled !== undefined && moduleKey === 'items') upsert('priceUnitBasisEnabled', !!priceUnitBasisEnabled);
     if (priceUnitBasis !== undefined && moduleKey === 'items') {
       if (!['unit1','unit2'].includes(String(priceUnitBasis))) return res.status(400).json({ error: 'priceUnitBasis must be unit1 or unit2' });
@@ -465,14 +465,14 @@ router.put('/:firmId/modules/:moduleKey', (req: Request, res: Response) => {
     }
 
     res.json({ success: true, data: getModuleSettings(firmId, moduleKey) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // ── Item Master column visibility ─────────────────────────────────────────────
 router.get('/:firmId/item-columns', (req: Request, res: Response) => {
   try {
     res.json({ success:true, data:getItemColumnSettings(req.params.firmId), labels:ITEM_COLUMN_LABELS, keys:ITEM_COLUMN_KEYS });
-  } catch (err:any) { res.status(500).json({ error:err.message }); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.put('/:firmId/item-columns', (req: Request, res: Response) => {
@@ -495,7 +495,7 @@ router.put('/:firmId/item-columns', (req: Request, res: Response) => {
 router.get('/:firmId/visibility', (req: Request, res: Response) => {
   try {
     res.json({ success: true, data: getVisibilitySettings(req.params.firmId) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 /**
@@ -514,7 +514,7 @@ router.put('/:firmId/visibility', (req: Request, res: Response) => {
     }
     setVisibilityBulk(firmId, updates);
     res.json({ success: true, data: getVisibilitySettings(firmId) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 /**
@@ -531,7 +531,7 @@ router.put('/:firmId/visibility/:moduleKey', (req: Request, res: Response) => {
     const visible = req.body.visible !== undefined ? !!req.body.visible : !(getVisibilitySettings(firmId) as any)[moduleKey];
     setVisibilityBulk(firmId, { [moduleKey]: visible } as any);
     res.json({ success: true, data: getVisibilitySettings(firmId) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 export default router;

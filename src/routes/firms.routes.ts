@@ -28,7 +28,7 @@ router.get('/', (req: Request, res: Response) => {
     const firms = db.prepare('SELECT * FROM firms ORDER BY createdAt DESC').all();
     res.json({ success: true, data: firms });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -39,7 +39,7 @@ router.get('/:id', (req: Request, res: Response) => {
     if (!firm) return res.status(404).json({ error: 'Firm not found' });
     res.json({ success: true, data: firm });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -111,7 +111,7 @@ router.post('/', async (req: Request, res: Response) => {
   } catch (err: any) {
     const status = Number(err?.status || 0);
     if (status >= 400 && status < 600) return res.status(status).json({ success:false, error:err?.message || 'Unable to create company.', code:err?.code || undefined, data:err?.data || undefined });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -156,7 +156,7 @@ router.put('/:id', (req: Request, res: Response) => {
     const firm = db.prepare('SELECT * FROM firms WHERE id = ?').get(firmId);
     res.json({ success: true, data: firm });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -170,7 +170,7 @@ router.post('/:id/delete-challenge', (req: Request, res: Response) => {
     const token = issueDeleteChallenge(firmId);
     res.json({ success: true, data: { token, firmId, firmName: firm.name, expiresInSeconds: DELETE_CHALLENGE_TTL_MS / 1000 } });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -195,7 +195,7 @@ router.delete('/:id', (req: Request, res: Response) => {
     deleteFirm();
     res.json({ success: true, message: 'Firm deleted', data: { id: firmId, name: firm.name } });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 

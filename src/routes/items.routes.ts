@@ -75,7 +75,7 @@ router.get('/export/excel', (req: Request, res: Response) => {
     res.setHeader('Content-Disposition', 'attachment; filename="bmax_item_master_export.xlsx"');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.send(buf);
-  } catch (err:any) { res.status(500).json({ error: err.message }); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // GET all items
@@ -120,7 +120,7 @@ router.get('/', (req: Request, res: Response) => {
     if (paginated) return res.json({ success: true, data: items, pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)), hasPrevious: page > 1, hasNext: offset + items.length < total } });
     res.json({ success: true, data: items });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -137,7 +137,7 @@ router.get('/:id/history', (req: Request, res: Response) => {
     q+=' ORDER BY d.documentDate DESC,d.createdAt DESC';
     const transactions=(db.prepare(q).all(params) as any[]).map(r=>({...r,direction:['purchase_invoice','purchase_return'].includes(r.documentType)?'purchase':['sale_invoice','sale_return'].includes(r.documentType)?'sale':'other'}));
     res.json({success:true,data:{item,transactions}});
-  } catch(err:any){res.status(500).json({error:err.message})}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}
 });
 
 // POST upload/update item image
@@ -181,7 +181,7 @@ router.put('/:id/opening-stock', (req: Request, res: Response) => {
     });
     tx();
     res.json({ success:true, data: db.prepare('SELECT * FROM items WHERE id=?').get(req.params.id) });
-  } catch (err:any) { res.status(500).json({ error: err.message }); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // GET item by id
@@ -197,7 +197,7 @@ router.get('/:id', (req: Request, res: Response) => {
     if (!item) return res.status(404).json({ error: 'Item not found' });
     res.json({ success: true, data: item });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -296,7 +296,7 @@ router.post('/', (req: Request, res: Response) => {
     const item = db.prepare('SELECT * FROM items WHERE id = ?').get(id);
     res.status(201).json({ success: true, data: item });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -375,7 +375,7 @@ router.put('/:id', (req: Request, res: Response) => {
     const item = db.prepare('SELECT * FROM items WHERE id = ?').get(req.params.id);
     res.json({ success: true, data: item });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -390,7 +390,7 @@ router.get('/:id/transaction-check', (req: Request, res: Response) => {
     const counter:any=db.prepare('SELECT COUNT(*) count FROM counter_sale_items csi JOIN counter_sales cs ON cs.id=csi.counterSaleId WHERE csi.itemId=? AND cs.firmId=?').get(req.params.id,firmId);
     const transactionCount=Number(documents?.count||0)+Number(counter?.count||0);
     res.json({success:true,data:{hasTransactions:transactionCount>0,transactionCount,itemId:item.id,firmId}});
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 // DELETE item: server-side accounting safety guard. UI checks are advisory only.
@@ -406,7 +406,7 @@ router.delete('/:id', (req: Request, res: Response) => {
     if(transactionCount>0) return res.status(409).json({error:'Item cannot be deleted because transactions exist for it.',data:{hasTransactions:true,transactionCount}});
     db.prepare('UPDATE items SET isActive=0, updatedAt=? WHERE id=? AND firmId=?').run(new Date().toISOString(),item.id,firmId);
     res.json({success:true,message:'Item deleted'});
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 // GET stock summary
@@ -420,7 +420,7 @@ router.get('/stock/summary', (req: Request, res: Response) => {
     `).all([firmId]);
     res.json({ success: true, data: items });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 

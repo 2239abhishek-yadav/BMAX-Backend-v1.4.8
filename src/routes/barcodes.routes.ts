@@ -57,7 +57,7 @@ router.post('/print-preview',(req:Request,res:Response)=>{
     const labels=makeLabels(rows,copies);
     if(!labels.length)return res.status(400).json({error:'No barcode labels available'});
     res.json({success:true,data:{labels,barcodeMode:mode,copies:labels.length}});
-  }catch(err:any){res.status(500).json({error:err?.message||'Barcode print preview failed'});}
+  }catch(err:any){res.status(500).json({error:'An unexpected error occurred. Please try again or contact B-MAX support.'});}
 });
 
 export default router;

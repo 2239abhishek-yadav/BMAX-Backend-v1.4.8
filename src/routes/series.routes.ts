@@ -19,7 +19,7 @@ router.get('/', (req: Request, res: Response) => {
     if (transactionType) { q += ' AND transactionType = ?'; params.push(transactionType); }
     q += ' ORDER BY transactionType, isDefault DESC, name';
     res.json({ success: true, data: db.prepare(q).all(params) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // GET single series
@@ -28,7 +28,7 @@ router.get('/:id', (req: Request, res: Response) => {
     const s = db.prepare('SELECT * FROM series WHERE id = ?').get(req.params.id);
     if (!s) return res.status(404).json({ error: 'Series not found' });
     res.json({ success: true, data: s });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // POST create series
@@ -73,7 +73,7 @@ router.post('/', (req: Request, res: Response) => {
     run();
 
     res.status(201).json({ success: true, data: db.prepare('SELECT * FROM series WHERE id = ?').get(id) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // PUT update series (does NOT reset currentNumber unless explicitly provided —
@@ -113,7 +113,7 @@ router.put('/:id', (req: Request, res: Response) => {
     run();
 
     res.json({ success: true, data: db.prepare('SELECT * FROM series WHERE id = ?').get(req.params.id) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // DELETE series (blocked if it has ever been used, to protect historical documents/reports —
@@ -127,7 +127,7 @@ router.delete('/:id', (req: Request, res: Response) => {
     }
     db.prepare('DELETE FROM series WHERE id = ?').run(req.params.id);
     res.json({ success: true, message: 'Series deleted' });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 // GET preview of the next number WITHOUT consuming it (for showing in the form before save)
@@ -136,7 +136,7 @@ router.get('/:id/preview', (req: Request, res: Response) => {
     const s = db.prepare('SELECT * FROM series WHERE id = ?').get(req.params.id) as any;
     if (!s) return res.status(404).json({ error: 'Series not found' });
     res.json({ success: true, data: formatSeriesNumber(s, s.currentNumber) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 function formatSeriesNumber(series: any, num: number): string {

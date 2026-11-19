@@ -8,7 +8,7 @@ function ensureItemCompanyTable(){
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_item_companies_firm_name ON item_companies(firmId,name COLLATE NOCASE)');
 }
 
-router.get('/', (req: Request,res: Response)=>{ try { ensureItemCompanyTable(); const firmId=String(req.query.firmId||'').trim(); if(!firmId)return res.status(400).json({error:'firmId required'}); const data=db.prepare('SELECT id,firmId,name,createdAt,updatedAt FROM item_companies WHERE firmId=? ORDER BY name COLLATE NOCASE').all(firmId); res.json({success:true,data}); } catch(e:any){res.status(500).json({error:e.message});} });
+router.get('/', (req: Request,res: Response)=>{ try { ensureItemCompanyTable(); const firmId=String(req.query.firmId||'').trim(); if(!firmId)return res.status(400).json({error:'firmId required'}); const data=db.prepare('SELECT id,firmId,name,createdAt,updatedAt FROM item_companies WHERE firmId=? ORDER BY name COLLATE NOCASE').all(firmId); res.json({success:true,data}); } catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });} });
 
 router.post('/', (req: Request,res: Response)=>{
   try {
@@ -25,7 +25,7 @@ router.post('/', (req: Request,res: Response)=>{
     res.status(201).json({success:true,data:row});
   } catch(e:any){
     console.error('[item-companies] create failed:',e?.message||e);
-    res.status(500).json({success:false,error:e?.message||'Unable to create item company',code:'ITEM_COMPANY_CREATE_FAILED'});
+    res.status(500).json({success:false,error:'An unexpected error occurred. Please try again or contact B-MAX support.',code:'ITEM_COMPANY_CREATE_FAILED'});
   }
 });
 export default router;

@@ -31,7 +31,7 @@ function transporterFor(firmId:string){
   return {c,transporter:nodemailer.createTransport({host:String(c.host),port:Number(c.port),secure:String(c.secure)==='true',auth:{user:String(c.username),pass:String(c.password)}})};
 }
 
-router.get('/:firmId/config',(req:Request,res:Response)=>{try{const c=getConfig(String(req.params.firmId));const password=String(c.password||'');res.json({success:true,data:{...c,password:password?'••••••••':''}})}catch(e:any){res.status(500).json({error:e.message})}});
+router.get('/:firmId/config',(req:Request,res:Response)=>{try{const c=getConfig(String(req.params.firmId));const password=String(c.password||'');res.json({success:true,data:{...c,password:password?'••••••••':''}})}catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
 
 router.put('/:firmId/config',(req:Request,res:Response)=>{try{
   const firmId=String(req.params.firmId), b=req.body||{};
@@ -45,7 +45,7 @@ router.put('/:firmId/config',(req:Request,res:Response)=>{try{
   if(!cfg.username||!cfg.password) return res.status(400).json({error:'Email login and password/app-password are required.'});
   if(!cfg.host||!Number.isFinite(cfg.port)||cfg.port<1||cfg.port>65535) return res.status(400).json({error:'Valid SMTP host and port are required.'});
   saveConfig(firmId,cfg);res.json({success:true,data:{...cfg,password:'••••••••'}});
-}catch(e:any){res.status(500).json({error:e.message})}});
+}catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
 
 router.post('/:firmId/test',(req:Request,res:Response)=>{(async()=>{try{const {transporter}=transporterFor(String(req.params.firmId));await transporter.verify();res.json({success:true,data:{ok:true}})}catch(e:any){res.status(502).json({error:e?.message||'SMTP connection failed'})}})()});
 

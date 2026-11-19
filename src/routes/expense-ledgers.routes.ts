@@ -14,7 +14,7 @@ router.get('/', (req: Request, res: Response) => {
     const rows = db.prepare(`SELECT id,firmId,name,type,accountGroup,accountNature,isSystemLedger,createdAt,updatedAt
       FROM categories WHERE firmId=? AND type='expense' ORDER BY name COLLATE NOCASE`).all(String(firmId));
     res.json({ success: true, data: rows.map((r:any)=>({ ...r, accountGroup: r.accountGroup || DIRECT_GROUP, accountNature: r.accountNature || 'expense' })) });
-  } catch (err:any) { res.status(500).json({ error: err.message }); }
+  } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.post('/', (req: Request, res: Response) => {
@@ -30,7 +30,7 @@ router.post('/', (req: Request, res: Response) => {
       VALUES (?,?,?,?,?,?,?,?,?)`).run(id,firmId,name,'expense',accountGroup,'expense',0,now,now);
     const row=db.prepare('SELECT id,firmId,name,type,accountGroup,accountNature,isSystemLedger,createdAt,updatedAt FROM categories WHERE id=?').get(id) as any;
     res.status(201).json({ success:true, data:row });
-  } catch(err:any){ res.status(500).json({error:err.message}); }
+  } catch(err:any){ res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 router.put('/:id', (req: Request, res: Response) => {
@@ -45,7 +45,7 @@ router.put('/:id', (req: Request, res: Response) => {
     if(!r.changes) return res.status(404).json({error:'Expense ledger not found'});
     const row=db.prepare('SELECT id,firmId,name,type,accountGroup,accountNature,isSystemLedger,createdAt,updatedAt FROM categories WHERE id=?').get(req.params.id);
     res.json({success:true,data:row});
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 export default router;

@@ -13,7 +13,7 @@ function ensureCategoryTable(){
   db.exec('CREATE INDEX IF NOT EXISTS idx_categories_firm_type ON categories(firmId,type)');
 }
 
-router.get('/', (req: Request, res: Response) => { try { ensureCategoryTable(); const firmId=String(req.query.firmId||'').trim(); if(!firmId)return res.status(400).json({error:'firmId is required'}); const { type } = req.query; let q = 'SELECT * FROM categories WHERE firmId = ?'; const p: any[] = [firmId]; if (type) { q += ' AND type = ?'; p.push(String(type)); } q += ' ORDER BY name COLLATE NOCASE'; res.json({ success: true, data: db.prepare(q).all(p) }); } catch (err: any) { res.status(500).json({ error: err.message }); } });
+router.get('/', (req: Request, res: Response) => { try { ensureCategoryTable(); const firmId=String(req.query.firmId||'').trim(); if(!firmId)return res.status(400).json({error:'firmId is required'}); const { type } = req.query; let q = 'SELECT * FROM categories WHERE firmId = ?'; const p: any[] = [firmId]; if (type) { q += ' AND type = ?'; p.push(String(type)); } q += ' ORDER BY name COLLATE NOCASE'; res.json({ success: true, data: db.prepare(q).all(p) }); } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); } });
 
 router.post('/', (req: Request, res: Response) => {
   try {
@@ -33,10 +33,10 @@ router.post('/', (req: Request, res: Response) => {
     res.status(201).json({success:true,data:row});
   } catch(err:any) {
     console.error('[categories] create failed:',err?.message||err);
-    res.status(500).json({success:false,error:err?.message||'Unable to create category',code:'CATEGORY_CREATE_FAILED'});
+    res.status(500).json({success:false,error:'An unexpected error occurred. Please try again or contact B-MAX support.',code:'CATEGORY_CREATE_FAILED'});
   }
 });
 
-router.put('/:id', (req: Request, res: Response) => { try { ensureCategoryTable(); const { name } = req.body; db.prepare('UPDATE categories SET name=?, updatedAt=? WHERE id=?').run(String(name||'').trim(), new Date().toISOString(), req.params.id); res.json({ success: true }); } catch (err: any) { res.status(500).json({ error: err.message }); } });
-router.delete('/:id', (req: Request, res: Response) => { try { ensureCategoryTable(); db.prepare('DELETE FROM categories WHERE id = ?').run(req.params.id); res.json({ success: true }); } catch (err: any) { res.status(500).json({ error: err.message }); } });
+router.put('/:id', (req: Request, res: Response) => { try { ensureCategoryTable(); const { name } = req.body; db.prepare('UPDATE categories SET name=?, updatedAt=? WHERE id=?').run(String(name||'').trim(), new Date().toISOString(), req.params.id); res.json({ success: true }); } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); } });
+router.delete('/:id', (req: Request, res: Response) => { try { ensureCategoryTable(); db.prepare('DELETE FROM categories WHERE id = ?').run(req.params.id); res.json({ success: true }); } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); } });
 export default router;

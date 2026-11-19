@@ -10,7 +10,7 @@ router.get('/', (req: Request, res: Response) => {
     if (!firmId) return res.status(400).json({ error: 'firmId is required' });
     const rows = db.prepare('SELECT * FROM gst_registrations WHERE firmId=? ORDER BY isPrimary DESC, createdAt ASC').all(firmId);
     res.json({ success:true, data:rows });
-  } catch (e:any) { res.status(500).json({error:e.message}); }
+  } catch (e:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 router.post('/', (req: Request, res: Response) => {
   try {
@@ -26,12 +26,12 @@ router.post('/', (req: Request, res: Response) => {
     });
     tx();
     res.status(201).json({success:true,data:db.prepare('SELECT * FROM gst_registrations WHERE id=?').get(id)});
-  } catch(e:any){ res.status(500).json({error:e.message}); }
+  } catch(e:any){ res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 router.put('/:id', (req:Request,res:Response)=>{
-  try { const {gstin,legalName,tradeName,state,stateCode,address,pincode,isPrimary,isActive,firmId}=req.body||{}; const row=db.prepare('SELECT * FROM gst_registrations WHERE id=?').get(req.params.id) as any; if(!row)return res.status(404).json({error:'GST registration not found'}); const check=validateGSTIN(gstin||row.gstin); if(!check.valid)return res.status(400).json({error:check.error}); const now=new Date().toISOString(); const tx=db.transaction(()=>{if(isPrimary)db.prepare('UPDATE gst_registrations SET isPrimary=0 WHERE firmId=?').run(firmId||row.firmId); db.prepare('UPDATE gst_registrations SET gstin=?,legalName=?,tradeName=?,state=?,stateCode=?,address=?,pincode=?,isPrimary=?,isActive=?,updatedAt=? WHERE id=?').run(check.value,legalName??row.legalName,tradeName??row.tradeName,state??row.state,stateCode??row.stateCode,address??row.address,pincode??row.pincode,isPrimary?1:0,isActive===undefined?row.isActive:(isActive?1:0),now,req.params.id);}); tx(); res.json({success:true,data:db.prepare('SELECT * FROM gst_registrations WHERE id=?').get(req.params.id)}); } catch(e:any){res.status(500).json({error:e.message});}
+  try { const {gstin,legalName,tradeName,state,stateCode,address,pincode,isPrimary,isActive,firmId}=req.body||{}; const row=db.prepare('SELECT * FROM gst_registrations WHERE id=?').get(req.params.id) as any; if(!row)return res.status(404).json({error:'GST registration not found'}); const check=validateGSTIN(gstin||row.gstin); if(!check.valid)return res.status(400).json({error:check.error}); const now=new Date().toISOString(); const tx=db.transaction(()=>{if(isPrimary)db.prepare('UPDATE gst_registrations SET isPrimary=0 WHERE firmId=?').run(firmId||row.firmId); db.prepare('UPDATE gst_registrations SET gstin=?,legalName=?,tradeName=?,state=?,stateCode=?,address=?,pincode=?,isPrimary=?,isActive=?,updatedAt=? WHERE id=?').run(check.value,legalName??row.legalName,tradeName??row.tradeName,state??row.state,stateCode??row.stateCode,address??row.address,pincode??row.pincode,isPrimary?1:0,isActive===undefined?row.isActive:(isActive?1:0),now,req.params.id);}); tx(); res.json({success:true,data:db.prepare('SELECT * FROM gst_registrations WHERE id=?').get(req.params.id)}); } catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
-router.delete('/:id',(req:Request,res:Response)=>{try{db.prepare('DELETE FROM gst_registrations WHERE id=?').run(req.params.id);res.json({success:true});}catch(e:any){res.status(500).json({error:e.message});}});
+router.delete('/:id',(req:Request,res:Response)=>{try{db.prepare('DELETE FROM gst_registrations WHERE id=?').run(req.params.id);res.json({success:true});}catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}});
 export default router;
 
 

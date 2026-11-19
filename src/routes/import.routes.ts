@@ -122,7 +122,7 @@ router.get('/items/template', (_req: Request, res: Response) => {
     res.setHeader('Content-Disposition', 'attachment; filename="bmax_items_import_template.xlsx"');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.send(buf);
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 /* ─── PARTIES TEMPLATE ──────────────────────────────────────────────────── */
@@ -162,7 +162,7 @@ router.get('/parties/template', (_req: Request, res: Response) => {
     res.setHeader('Content-Disposition', 'attachment; filename="bmax_parties_template.xlsx"');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.send(buf);
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
 /* ─── ITEMS PREVIEW ─────────────────────────────────────────────────────── */
@@ -279,7 +279,7 @@ router.post('/items/preview', upload.single('file'), (req: Request, res: Respons
 
     res.json({ success: true, data: { rows: results, summary: { total: results.length, ok, errors } } });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -363,7 +363,7 @@ router.post('/items/commit', (req: Request, res: Response) => {
     importRows();
     res.json({ success: true, data: { inserted, updated, skipped } });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -443,7 +443,7 @@ router.post('/parties/preview', upload.single('file'), (req: Request, res: Respo
 
     res.json({ success: true, data: { rows: results, summary: { total: results.length, ok, errors } } });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -494,7 +494,7 @@ router.post('/parties/commit', (req: Request, res: Response) => {
     importRows();
     res.json({ success: true, data: { inserted, updated, skipped } });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
   }
 });
 
@@ -508,7 +508,7 @@ router.get('/opening-stock/template', (_req: Request, res: Response) => {
     const ws = XLSX.utils.aoa_to_sheet([headers,sample]); ws['!cols']=headers.map(()=>({wch:27})); XLSX.utils.book_append_sheet(wb,ws,'Opening Stock');
     const ins=XLSX.utils.aoa_to_sheet([['B-MAX — Opening Stock Import'],[''],['Only Item Name and Opening Stock are required.'],['Batch, packing, MFG/Expiry dates and rates are optional.'],['If batch tracking is enabled in B-MAX, a supplied Batch Number creates/updates the batch record.'],['If batch tracking is disabled, batch-specific fields are ignored; the item opening stock is still imported.'],['Multiple rows for the same item are allowed; their quantities are added.'],['Item Code is optional but helps identify an item when names are duplicated.'],['If the item is missing, B-MAX creates it automatically. Unit 1, Category and Company are also created automatically when supplied.'],['Do not change the column headers.']]); ins['!cols']=[{wch:100}]; XLSX.utils.book_append_sheet(wb,ins,'Instructions');
     const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'}); res.setHeader('Content-Disposition','attachment; filename="BMAX_opening_stock_template.xlsx"'); res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.send(buf);
-  } catch(err:any){res.status(500).json({error:err.message});}
+  } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 router.post('/opening-stock/preview', upload.single('file'), (req: Request,res: Response)=>{
@@ -548,7 +548,7 @@ router.post('/opening-stock/commit',(req:Request,res:Response)=>{
 
 /* ─── OPENING BALANCE TEMPLATE / IMPORT ─────────────────────────────────── */
 router.get('/opening-balance/template', (_req: Request,res:Response)=>{
-  try{const wb=XLSX.utils.book_new(); const headers=['Party Name*','Opening Balance*','Balance Type (DEBIT/CREDIT, optional)','Party Code (optional)','Phone (optional)','Notes (optional)']; const sample=['ABC Traders',25000,'DEBIT','PARTY-00001','9876543210','Opening receivable']; const ws=XLSX.utils.aoa_to_sheet([headers,sample]); ws['!cols']=headers.map(()=>({wch:32})); XLSX.utils.book_append_sheet(wb,ws,'Opening Balance'); const ins=XLSX.utils.aoa_to_sheet([['B-MAX — Opening Balance Import'],[''],['Party Name and Opening Balance are required.'],['Balance Type is optional and defaults to DEBIT / To Receive.'],['Use CREDIT for To Pay.'],['Party Code or Phone can be used to identify a party when names are duplicated.'],['Do not change the column headers.']]); ins['!cols']=[{wch:100}]; XLSX.utils.book_append_sheet(wb,ins,'Instructions'); const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'}); res.setHeader('Content-Disposition','attachment; filename="BMAX_opening_balance_template.xlsx"'); res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.send(buf);}catch(err:any){res.status(500).json({error:err.message});}
+  try{const wb=XLSX.utils.book_new(); const headers=['Party Name*','Opening Balance*','Balance Type (DEBIT/CREDIT, optional)','Party Code (optional)','Phone (optional)','Notes (optional)']; const sample=['ABC Traders',25000,'DEBIT','PARTY-00001','9876543210','Opening receivable']; const ws=XLSX.utils.aoa_to_sheet([headers,sample]); ws['!cols']=headers.map(()=>({wch:32})); XLSX.utils.book_append_sheet(wb,ws,'Opening Balance'); const ins=XLSX.utils.aoa_to_sheet([['B-MAX — Opening Balance Import'],[''],['Party Name and Opening Balance are required.'],['Balance Type is optional and defaults to DEBIT / To Receive.'],['Use CREDIT for To Pay.'],['Party Code or Phone can be used to identify a party when names are duplicated.'],['Do not change the column headers.']]); ins['!cols']=[{wch:100}]; XLSX.utils.book_append_sheet(wb,ins,'Instructions'); const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'}); res.setHeader('Content-Disposition','attachment; filename="BMAX_opening_balance_template.xlsx"'); res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.send(buf);}catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 router.post('/opening-balance/preview',upload.single('file'),(req:Request,res:Response)=>{try{const firmId=String(req.body.firmId||'').trim();if(!firmId)return res.status(400).json({error:'firmId required'});if(!req.file)return res.status(400).json({error:'Excel file required'});const wb=XLSX.read(req.file.buffer,{type:'buffer'});const ws=wb.Sheets[wb.SheetNames[0]];const rows=XLSX.utils.sheet_to_json(ws,{defval:''}) as any[];const out=rows.map((r:any,i:number)=>{const name=cellStr(r['Party Name*']||r['Party Name']);const amount=Number(r['Opening Balance*']??r['Opening Balance']);const type=cellStr(r['Balance Type (DEBIT/CREDIT, optional)']||r['Balance Type']).toLowerCase()||'debit';const code=cellStr(r['Party Code (optional)']||r['Party Code']);const phone=cellStr(r['Phone (optional)']||r['Phone']);if(!name)return{row:i+2,status:'error',error:'Party Name is required'};if(!Number.isFinite(amount)||amount<0)return{row:i+2,status:'error',error:'Opening Balance must be a non-negative number'};if(!['debit','credit'].includes(type))return{row:i+2,status:'error',error:'Balance Type must be DEBIT or CREDIT'};let party:any=null;if(code)party=db.prepare('SELECT id,name,partyCode,phone FROM parties WHERE firmId=? AND partyCode=? LIMIT 1').get(firmId,code);if(!party&&phone)party=db.prepare('SELECT id,name,partyCode,phone FROM parties WHERE firmId=? AND phone=? LIMIT 1').get(firmId,phone);if(!party){const a=db.prepare('SELECT id,name,partyCode,phone FROM parties WHERE firmId=? AND lower(name)=lower(?) AND isActive=1 ORDER BY id LIMIT 2').all(firmId,name) as any[];if(a.length===1)party=a[0];else if(a.length>1)return{row:i+2,status:'error',error:`Multiple parties match "${name}". Use Party Code or Phone.`};}return{row:i+2,status:'ok',partyId:party?.id||null,partyName:party?.name||name,partyCode:party?.partyCode||code,phone,amount,type,autoCreateParty:!party};});res.json({success:true,data:{rows:out}});}catch(err:any){res.status(400).json({error:`Unable to read opening balance Excel: ${err.message}`});}});

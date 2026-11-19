@@ -214,7 +214,7 @@ router.get('/usage', (_req: Request, res: Response) => {
       status: access.state?.status || null,
     }});
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message || 'Unable to load subscription usage.' });
+    res.status(500).json({ success: false, error: 'An unexpected error occurred. Please try again or contact B-MAX support.' });
   }
 });
 
