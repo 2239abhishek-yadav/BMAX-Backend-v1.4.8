@@ -98,7 +98,10 @@ router.get('/', (req: Request, res: Response) => {
     if (type) { where += ' AND i.type = ?'; params.push(type); }
     if (categoryId) { where += ' AND i.categoryId = ?'; params.push(categoryId); }
     if (companyId) { where += ' AND i.companyId = ?'; params.push(companyId); }
-    if (active !== undefined) { where += ' AND i.isActive = ?'; params.push(active === 'true' ? 1 : 0); }
+    // Soft-deleted items must disappear from every normal selector/list by default.
+    // Explicit active=false is reserved for inactive-item views; active=all is an audited admin opt-in.
+    if (active === 'all') { /* intentionally include both active and inactive rows */ }
+    else { where += ' AND COALESCE(i.isActive,1) = ?'; params.push(active === 'false' ? 0 : 1); }
     if (search) { where += ' AND (i.name LIKE ? OR i.itemCode LIKE ? OR i.sku LIKE ? OR i.barcode LIKE ?)'; const term=`%${search}%`; params.push(term,term,term,term); }
     if (stockStatus === 'in_stock') where += ' AND COALESCE(i.currentStock,0) > COALESCE(i.minStockLevel,0) AND COALESCE(i.currentStock,0) > 0';
     else if (stockStatus === 'low_stock') where += ' AND COALESCE(i.currentStock,0) > 0 AND COALESCE(i.minStockLevel,0) > 0 AND COALESCE(i.currentStock,0) <= COALESCE(i.minStockLevel,0)';
@@ -386,26 +389,40 @@ router.get('/:id/transaction-check', (req: Request, res: Response) => {
     if(!item) return res.status(404).json({error:'Item not found'});
     const firmId=String(req.query.firmId||item.firmId);
     if(firmId!==String(item.firmId)) return res.status(403).json({error:'Item does not belong to firm'});
-    const documents:any=db.prepare('SELECT COUNT(*) count FROM document_items di JOIN documents d ON d.id=di.documentId WHERE di.itemId=? AND d.firmId=?').get(req.params.id,firmId);
-    const counter:any=db.prepare('SELECT COUNT(*) count FROM counter_sale_items csi JOIN counter_sales cs ON cs.id=csi.counterSaleId WHERE csi.itemId=? AND cs.firmId=?').get(req.params.id,firmId);
-    const transactionCount=Number(documents?.count||0)+Number(counter?.count||0);
-    res.json({success:true,data:{hasTransactions:transactionCount>0,transactionCount,itemId:item.id,firmId}});
+    const deps:any=db.prepare(`SELECT
+      (SELECT COUNT(*) FROM document_items di JOIN documents d ON d.id=di.documentId WHERE di.itemId=? AND d.firmId=?) documents,
+      (SELECT COUNT(*) FROM counter_sale_items csi WHERE csi.itemId=? AND csi.firmId=?) counterSales,
+      (SELECT COUNT(*) FROM stock_transfer_items sti WHERE sti.itemId=? AND sti.firmId=?) stockTransfers,
+      (SELECT COUNT(*) FROM job_work_lines jwl JOIN job_work_orders jwo ON jwo.id=jwl.orderId WHERE jwl.itemId=? AND jwo.firmId=?) jobWork,
+      (SELECT COUNT(*) FROM inventory_batches WHERE itemId=? AND firmId=? AND COALESCE(quantity,0)>0) batchesWithStock,
+      (SELECT COUNT(*) FROM inventory_stock WHERE itemId=? AND firmId=? AND ABS(COALESCE(quantity,0))>0.0001) godownStock,
+      (SELECT COUNT(*) FROM items WHERE id=? AND firmId=? AND ABS(COALESCE(openingStock,0))>0.0001) openingStock`).get(req.params.id,firmId,req.params.id,firmId,req.params.id,firmId,req.params.id,firmId,req.params.id,firmId,req.params.id,firmId,req.params.id,firmId) as any;
+    const transactionCount=Number(deps.documents||0)+Number(deps.counterSales||0);
+    const dependencyCount=transactionCount+Number(deps.stockTransfers||0)+Number(deps.jobWork||0)+Number(deps.batchesWithStock||0)+Number(deps.godownStock||0)+Number(deps.openingStock||0);
+    res.json({success:true,data:{hasTransactions:transactionCount>0,transactionCount,hasDependencies:dependencyCount>0,dependencyCount,dependencies:deps,itemId:item.id,firmId}});
   } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
-// DELETE item: server-side accounting safety guard. UI checks are advisory only.
+// Soft-delete only after the backend verifies every stock and transaction relationship.
 router.delete('/:id', (req: Request, res: Response) => {
   try {
     const item:any=db.prepare('SELECT id,firmId,name,isActive FROM items WHERE id=?').get(req.params.id);
     if(!item) return res.status(404).json({error:'Item not found'});
     const firmId=String(req.body?.firmId||req.query?.firmId||item.firmId);
     if(firmId!==String(item.firmId)) return res.status(403).json({error:'Item does not belong to firm'});
-    const documents:any=db.prepare('SELECT COUNT(*) count FROM document_items di JOIN documents d ON d.id=di.documentId WHERE di.itemId=? AND d.firmId=?').get(item.id,firmId);
-    const counter:any=db.prepare('SELECT COUNT(*) count FROM counter_sale_items csi JOIN counter_sales cs ON cs.id=csi.counterSaleId WHERE csi.itemId=? AND cs.firmId=?').get(item.id,firmId);
-    const transactionCount=Number(documents?.count||0)+Number(counter?.count||0);
-    if(transactionCount>0) return res.status(409).json({error:'Item cannot be deleted because transactions exist for it.',data:{hasTransactions:true,transactionCount}});
-    db.prepare('UPDATE items SET isActive=0, updatedAt=? WHERE id=? AND firmId=?').run(new Date().toISOString(),item.id,firmId);
-    res.json({success:true,message:'Item deleted'});
+    const deps:any=db.prepare(`SELECT
+      (SELECT COUNT(*) FROM document_items di JOIN documents d ON d.id=di.documentId WHERE di.itemId=? AND d.firmId=?) documents,
+      (SELECT COUNT(*) FROM counter_sale_items csi WHERE csi.itemId=? AND csi.firmId=?) counterSales,
+      (SELECT COUNT(*) FROM stock_transfer_items sti WHERE sti.itemId=? AND sti.firmId=?) stockTransfers,
+      (SELECT COUNT(*) FROM job_work_lines jwl JOIN job_work_orders jwo ON jwo.id=jwl.orderId WHERE jwl.itemId=? AND jwo.firmId=?) jobWork,
+      (SELECT COUNT(*) FROM inventory_batches WHERE itemId=? AND firmId=? AND COALESCE(quantity,0)>0) batchesWithStock,
+      (SELECT COUNT(*) FROM inventory_stock WHERE itemId=? AND firmId=? AND ABS(COALESCE(quantity,0))>0.0001) godownStock,
+      (SELECT COUNT(*) FROM items WHERE id=? AND firmId=? AND ABS(COALESCE(openingStock,0))>0.0001) openingStock`).get(item.id,firmId,item.id,firmId,item.id,firmId,item.id,firmId,item.id,firmId,item.id,firmId,item.id,firmId) as any;
+    const dependencyCount=Object.values(deps).reduce<number>((sum, value) => sum + Number(value ?? 0), 0);
+    if(dependencyCount>0) return res.status(409).json({error:'Item cannot be deleted because it is linked to transactions, stock, transfers or job-work records.',data:{hasDependencies:true,dependencyCount,dependencies:deps}});
+    const changed=db.prepare('UPDATE items SET isActive=0, updatedAt=? WHERE id=? AND firmId=? AND COALESCE(isActive,1)=1').run(new Date().toISOString(),item.id,firmId);
+    if(!changed.changes) return res.status(409).json({error:'Item is already inactive.'});
+    res.json({success:true,message:'Item moved to Recycle Bin'});
   } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 

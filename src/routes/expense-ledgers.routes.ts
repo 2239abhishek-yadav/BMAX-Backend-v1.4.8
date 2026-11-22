@@ -23,14 +23,20 @@ router.post('/', (req: Request, res: Response) => {
     const name=String(req.body?.name||'').trim();
     const accountGroup=normalizeGroup(req.body?.accountGroup);
     if (!firmId || !name) return res.status(400).json({ error:'firmId and expense type name are required' });
-    const duplicate=db.prepare('SELECT id FROM categories WHERE firmId=? AND type=\'expense\' AND LOWER(name)=LOWER(?) LIMIT 1').get(firmId,name);
-    if (duplicate) return res.status(409).json({ error:'Expense type already exists', data: duplicate });
+    const duplicate=db.prepare(`SELECT id,firmId,name,type,accountGroup,accountNature,isSystemLedger,createdAt,updatedAt
+      FROM categories WHERE firmId=? AND type='expense' AND LOWER(TRIM(name))=LOWER(?) LIMIT 1`).get(firmId,name) as any;
+    if (duplicate) return res.status(409).json({ success:false, error:'Expense ledger already exists', data:{...duplicate,accountGroup:duplicate.accountGroup || DIRECT_GROUP,accountNature:duplicate.accountNature || 'expense'} });
     const now=new Date().toISOString(), id=uuidv4();
-    db.prepare(`INSERT INTO categories (id,firmId,name,type,accountGroup,accountNature,isSystemLedger,createdAt,updatedAt)
-      VALUES (?,?,?,?,?,?,?,?,?)`).run(id,firmId,name,'expense',accountGroup,'expense',0,now,now);
-    const row=db.prepare('SELECT id,firmId,name,type,accountGroup,accountNature,isSystemLedger,createdAt,updatedAt FROM categories WHERE id=?').get(id) as any;
-    res.status(201).json({ success:true, data:row });
-  } catch(err:any){ res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
+    const insert = db.transaction(() => {
+      db.prepare(`INSERT INTO categories (id,firmId,name,type,accountGroup,accountNature,isSystemLedger,createdAt,updatedAt)
+        VALUES (?,?,?,?,?,?,?,?,?)`).run(id,firmId,name,'expense',accountGroup,'expense',0,now,now);
+      return db.prepare(`SELECT id,firmId,name,type,accountGroup,accountNature,isSystemLedger,createdAt,updatedAt
+        FROM categories WHERE id=? AND firmId=? AND type='expense'`).get(id,firmId) as any;
+    });
+    const row=insert();
+    if (!row) return res.status(500).json({success:false,error:'Expense ledger was not saved'});
+    res.status(201).json({ success:true, data:{...row,accountGroup:row.accountGroup || DIRECT_GROUP,accountNature:row.accountNature || 'expense'} });
+  } catch(err:any){ console.error('[expense-ledgers] create failed:',err); res.status(400).json({ success:false,error: err?.code==='SQLITE_CONSTRAINT_FOREIGNKEY' ? 'Selected company is invalid. Refresh B-MAX and try again.' : 'Unable to create expense ledger. Please check the name and try again.', code: 'EXPENSE_LEDGER_CREATE_FAILED' }); }
 });
 
 router.put('/:id', (req: Request, res: Response) => {

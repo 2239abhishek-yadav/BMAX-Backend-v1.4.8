@@ -48,6 +48,18 @@ router.put('/barcode-templates/:firmId',(req,res)=>{try{
   res.json({success:true,data:{templates}});
 }catch(e:any){res.status(400).json({error:e.message})}});
 
+// Additive company soft-delete migration shared by Utility, company selectors and recycle bin.
+function ensureItemCompanySoftDelete(){
+  db.exec(`CREATE TABLE IF NOT EXISTS item_companies (id TEXT PRIMARY KEY, firmId TEXT NOT NULL, name TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, isActive INTEGER NOT NULL DEFAULT 1, FOREIGN KEY (firmId) REFERENCES firms(id) ON DELETE CASCADE)`);
+  const cols=(db.prepare('PRAGMA table_info(item_companies)').all() as any[]).map(c=>c.name);
+  if(!cols.includes('isActive')) db.exec('ALTER TABLE item_companies ADD COLUMN isActive INTEGER NOT NULL DEFAULT 1');
+  const index:any=db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_item_companies_firm_name'").get();
+  if(!String(index?.sql||'').includes('WHERE COALESCE(isActive,1)=1')){
+    db.exec('DROP INDEX IF EXISTS idx_item_companies_firm_name');
+    db.exec('CREATE UNIQUE INDEX idx_item_companies_firm_name ON item_companies(firmId,name COLLATE NOCASE) WHERE COALESCE(isActive,1)=1');
+  }
+}
+
 // Non-working data is a backend decision, not a UI-only filter.
 router.get('/non-working-data',(req,res)=>{try{
   const firmId=String(req.query.firmId||''); if(!firmId)return res.status(400).json({error:'firmId required'});
@@ -55,36 +67,86 @@ router.get('/non-working-data',(req,res)=>{try{
   const cutoff=new Date(); cutoff.setMonth(cutoff.getMonth()-months); const cut=cutoff.toISOString().slice(0,10); let rows:any[]=[];
   if(type==='items'||type==='category'||type==='company'){
     let q=`SELECT i.*, COALESCE(MAX(d.documentDate),'') lastActivity,
-      (SELECT COUNT(*) FROM document_items di JOIN documents dx ON dx.id=di.documentId WHERE di.itemId=i.id AND dx.firmId=i.firmId AND dx.isDeleted=0) transactions,
-      COALESCE((SELECT SUM(ib.quantity) FROM inventory_batches ib WHERE ib.itemId=i.id AND ib.firmId=i.firmId),0) stock
+      (SELECT COUNT(*) FROM document_items di JOIN documents dx ON dx.id=di.documentId WHERE di.itemId=i.id AND dx.firmId=i.firmId) transactions,
+      (SELECT COUNT(*) FROM counter_sale_items csi WHERE csi.itemId=i.id AND csi.firmId=i.firmId) counterSales,
+      (SELECT COUNT(*) FROM stock_transfer_items sti WHERE sti.itemId=i.id AND sti.firmId=i.firmId) stockTransfers,
+      (SELECT COUNT(*) FROM job_work_lines jwl JOIN job_work_orders jwo ON jwo.id=jwl.orderId WHERE jwl.itemId=i.id AND jwo.firmId=i.firmId) jobWorkReferences,
+      COALESCE((SELECT SUM(ib.quantity) FROM inventory_batches ib WHERE ib.itemId=i.id AND ib.firmId=i.firmId),0) stock,
+      COALESCE(i.openingStock,0) openingStock, 1 canDelete
       FROM items i LEFT JOIN document_items di ON di.itemId=i.id LEFT JOIN documents d ON d.id=di.documentId AND d.isDeleted=0
       WHERE i.firmId=? AND COALESCE(i.isActive,1)=1`;
     const params:any[]=[firmId];
     if(req.query.categoryId){q+=' AND i.categoryId=?';params.push(String(req.query.categoryId))}
     if(req.query.companyId){q+=' AND i.companyId=?';params.push(String(req.query.companyId))}
-    q+=' GROUP BY i.id HAVING (lastActivity < ? OR lastActivity IS NULL) AND transactions=0 AND stock=0 ORDER BY i.name';params.push(cut);
+    q+=' GROUP BY i.id HAVING (lastActivity < ? OR lastActivity IS NULL) AND transactions=0 AND counterSales=0 AND stockTransfers=0 AND jobWorkReferences=0 AND stock=0 AND openingStock=0 ORDER BY i.name';params.push(cut);
     rows=db.prepare(q).all(params);
   } else if(type==='parties'||type==='ledgers'||type==='salePurchase'){
     let q=`SELECT p.*, COALESCE(MAX(d.documentDate),'') lastActivity,
-      (SELECT COUNT(*) FROM documents dx WHERE dx.partyId=p.id AND dx.firmId=p.firmId AND dx.isDeleted=0) transactions,
+      (SELECT COUNT(*) FROM documents dx WHERE dx.partyId=p.id AND dx.firmId=p.firmId) transactions,
+      (SELECT COUNT(*) FROM payments pay WHERE pay.partyId=p.id AND pay.firmId=p.firmId) paymentReferences,
+      (SELECT COUNT(*) FROM expenses ex WHERE ex.partyId=p.id AND ex.firmId=p.firmId) expenseReferences,
+      (SELECT COUNT(*) FROM job_work_orders jw WHERE jw.partyId=p.id AND jw.firmId=p.firmId) jobWorkReferences,
+      (SELECT COUNT(*) FROM crm_loyalty_ledger cl WHERE cl.partyId=p.id AND cl.firmId=p.firmId) loyaltyReferences,
+      COALESCE(p.openingBalance,0) openingBalance, 1 canDelete,
       (SELECT COALESCE(SUM(CASE WHEN dx.documentType IN ('sale_invoice','purchase_invoice') THEN dx.balanceAmount ELSE 0 END),0) FROM documents dx WHERE dx.partyId=p.id AND dx.firmId=p.firmId AND dx.isDeleted=0) balance
-      FROM parties p LEFT JOIN documents d ON d.partyId=p.id AND d.isDeleted=0 WHERE p.firmId=? AND COALESCE(p.isActive,1)=1 GROUP BY p.id HAVING (lastActivity < ? OR lastActivity IS NULL) AND transactions=0 AND ABS(balance)<0.005 ORDER BY p.name`;
+      FROM parties p LEFT JOIN documents d ON d.partyId=p.id AND d.isDeleted=0 WHERE p.firmId=? AND COALESCE(p.isActive,1)=1 GROUP BY p.id HAVING (lastActivity < ? OR lastActivity IS NULL) AND transactions=0 AND paymentReferences=0 AND expenseReferences=0 AND jobWorkReferences=0 AND loyaltyReferences=0 AND ABS(balance)<0.005 AND ABS(openingBalance)<0.005 ORDER BY p.name`;
     rows=db.prepare(q).all(firmId,cut);
   } else if(type==='companies'||type==='companyMaster'){
-    try{rows=db.prepare(`SELECT c.*, '' lastActivity, 0 transactions, 0 stock FROM item_companies c WHERE c.firmId=? ORDER BY c.name`).all(firmId)}catch{rows=[]}
+    ensureItemCompanySoftDelete();
+    rows=db.prepare(`SELECT c.*, '' lastActivity, 0 transactions, 0 stock,
+      (SELECT COUNT(*) FROM items i WHERE i.firmId=c.firmId AND i.companyId=c.id) itemReferences,
+      CASE WHEN (SELECT COUNT(*) FROM items i WHERE i.firmId=c.firmId AND i.companyId=c.id)=0 THEN 1 ELSE 0 END canDelete
+      FROM item_companies c WHERE c.firmId=? AND COALESCE(c.isActive,1)=1 ORDER BY c.name`).all(firmId) as any[];
   }
   res.json({success:true,data:rows,asOf:new Date().toISOString(),cutoffDate:cut,type});
 }catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
 router.post('/non-working-data/delete',(req,res)=>{try{
-  const firmId=String(req.body?.firmId||''); const type=String(req.body?.type||'items'); const ids=Array.isArray(req.body?.ids)?req.body.ids.map(String):[]; if(!firmId||!ids.length)return res.status(400).json({error:'firmId and ids required'});
+  const firmId=String(req.body?.firmId||''); const type=String(req.body?.type||'items'); const ids: string[]=Array.isArray(req.body?.ids)?[...new Set((req.body.ids as unknown[]).map((value: unknown)=>String(value)).filter((value: string)=>Boolean(value)))]:[];
+  if(!firmId||!ids.length)return res.status(400).json({error:'firmId and ids required'});
   const table=(type==='items'||type==='category'||type==='company')?'items':(type==='parties'||type==='ledgers'||type==='salePurchase')?'parties':type==='companies'?'item_companies':'';
   if(!table)return res.status(400).json({error:'This non-working type is read-only'});
-  const tx=db.transaction(()=>{let deletedCount=0;const blocked:any[]=[];for(const id of ids){const row:any=db.prepare(`SELECT * FROM ${table} WHERE id=? AND firmId=?`).get(id,firmId);if(!row){blocked.push({id,reason:'Not found'});continue}
-    if(table==='items'){const deps:any=db.prepare(`SELECT (SELECT COUNT(*) FROM document_items di JOIN documents d ON d.id=di.documentId WHERE di.itemId=? AND d.isDeleted=0) transactions,(SELECT COALESCE(SUM(quantity),0) stock FROM inventory_batches WHERE itemId=? AND firmId=?) stock`).get(id,id,firmId);if(Number(deps.transactions)>0||Number(deps.stock)>0){blocked.push({id,reason:'Has transactions or stock'});continue}db.prepare('UPDATE items SET isActive=0,updatedAt=? WHERE id=? AND firmId=?').run(new Date().toISOString(),id,firmId)}
-    else if(table==='parties'){const deps:any=db.prepare(`SELECT COUNT(*) transactions,COALESCE(SUM(balanceAmount),0) balance FROM documents WHERE partyId=? AND firmId=? AND isDeleted=0`).get(id,firmId);if(Number(deps.transactions)>0||Math.abs(Number(deps.balance||0))>.005){blocked.push({id,reason:'Has transactions or balance'});continue}db.prepare('UPDATE parties SET isActive=0,updatedAt=? WHERE id=? AND firmId=?').run(new Date().toISOString(),id,firmId)}
-    else {db.prepare('UPDATE item_companies SET isActive=0,updatedAt=? WHERE id=? AND firmId=?').run(new Date().toISOString(),id,firmId)} deletedCount++;}return {deletedCount,blocked};});
+  if(table==='item_companies') ensureItemCompanySoftDelete();
+  const tx=db.transaction(()=>{let deletedCount=0;const deletedIds:string[]=[];const blocked:any[]=[];const now=new Date().toISOString();
+    for(const id of ids){
+      const row:any=db.prepare(`SELECT * FROM ${table} WHERE id=? AND firmId=?`).get(id,firmId);
+      if(!row){blocked.push({id,reason:'Record not found in this company.'});continue;}
+      if(table==='items'){
+        const deps:any=db.prepare(`SELECT
+          (SELECT COUNT(*) FROM document_items di JOIN documents d ON d.id=di.documentId WHERE di.itemId=? AND d.firmId=?) transactions,
+          (SELECT COUNT(*) FROM counter_sale_items csi WHERE csi.itemId=? AND csi.firmId=?) counterSales,
+          (SELECT COUNT(*) FROM stock_transfer_items sti WHERE sti.itemId=? AND sti.firmId=?) stockTransfers,
+          (SELECT COUNT(*) FROM job_work_lines jwl JOIN job_work_orders jwo ON jwo.id=jwl.orderId WHERE jwl.itemId=? AND jwo.firmId=?) jobWorkReferences,
+          (SELECT COALESCE(SUM(quantity),0) FROM inventory_batches WHERE itemId=? AND firmId=?) batchStock,
+          COALESCE((SELECT SUM(quantity) FROM inventory_stock WHERE itemId=? AND firmId=?),0) godownStock,
+          COALESCE((SELECT openingStock FROM items WHERE id=? AND firmId=?),0) openingStock`).get(id,firmId,id,firmId,id,firmId,id,firmId,id,firmId,id,firmId) as any;
+        const reason=Number(deps.transactions)>0?'Item has transaction history.':Number(deps.counterSales)>0?'Item is used in counter sales.':Number(deps.stockTransfers)>0?'Item is used in stock transfers.':Number(deps.jobWorkReferences)>0?'Item is used in job-work records.':Number(deps.batchStock)>0||Number(deps.godownStock)>0||Number(deps.openingStock)>0?'Item has stock or opening stock.':'';
+        if(reason){blocked.push({id,reason});continue;}
+        const changed=db.prepare('UPDATE items SET isActive=0,updatedAt=? WHERE id=? AND firmId=? AND COALESCE(isActive,1)=1').run(now,id,firmId);
+        if(!changed.changes){blocked.push({id,reason:'Item was already inactive.'});continue;}
+      } else if(table==='parties'){
+        const deps:any=db.prepare(`SELECT
+          (SELECT COUNT(*) FROM documents WHERE partyId=? AND firmId=?) documents,
+          (SELECT COUNT(*) FROM payments WHERE partyId=? AND firmId=?) payments,
+          (SELECT COUNT(*) FROM expenses WHERE partyId=? AND firmId=?) expenses,
+          (SELECT COUNT(*) FROM job_work_orders WHERE partyId=? AND firmId=?) jobWork,
+          (SELECT COUNT(*) FROM crm_loyalty_ledger WHERE partyId=? AND firmId=?) loyalty,
+          COALESCE((SELECT openingBalance FROM parties WHERE id=? AND firmId=?),0) openingBalance`).get(id,firmId,id,firmId,id,firmId,id,firmId,id,firmId,id,firmId) as any;
+        const reason=Number(deps.documents)>0?'Party has transaction history.':Number(deps.payments)>0?'Party has payment or receipt history.':Number(deps.expenses)>0?'Party is linked to expense records.':Number(deps.jobWork)>0?'Party is linked to job-work records.':Number(deps.loyalty)>0?'Party has loyalty history.':Math.abs(Number(deps.openingBalance||0))>.005?'Party has an opening balance.':'';
+        if(reason){blocked.push({id,reason});continue;}
+        const changed=db.prepare('UPDATE parties SET isActive=0,updatedAt=? WHERE id=? AND firmId=? AND COALESCE(isActive,1)=1').run(now,id,firmId);
+        if(!changed.changes){blocked.push({id,reason:'Party was already inactive.'});continue;}
+      } else {
+        const deps:any=db.prepare('SELECT COUNT(*) count FROM items WHERE firmId=? AND companyId=?').get(firmId,id) as any;
+        if(Number(deps.count)>0){blocked.push({id,reason:'Company is assigned to one or more items. Remove or change those item links first.'});continue;}
+        const changed=db.prepare('UPDATE item_companies SET isActive=0,updatedAt=? WHERE id=? AND firmId=? AND COALESCE(isActive,1)=1').run(now,id,firmId);
+        if(!changed.changes){blocked.push({id,reason:'Company was already inactive.'});continue;}
+      }
+      deletedCount++;deletedIds.push(id);
+    }
+    return {deletedCount,deletedIds,blocked};
+  });
   const out=tx();res.json({success:true,...out});
-}catch(e:any){res.status(400).json({error:e.message})}});
+}catch(e:any){res.status(500).json({error:'Unable to complete the requested deletion. No technical details were exposed.',code:'NON_WORKING_DELETE_FAILED'});}});
 
 router.get('/export/:firmId',(req,res)=>{try{const firmId=String(req.params.firmId); const tables=['firms','items','parties','documents','document_items','payments','expenses','inventory_batches','categories','units','bank_accounts','bank_transactions']; const payload:any={format:'BMAX-EXPORT',version:1,exportedAt:new Date().toISOString(),firmId,tables:{}}; for(const t of tables){try{const cols=db.prepare(`PRAGMA table_info(${t})`).all() as any[]; if(!cols.length)continue; payload.tables[t]=db.prepare(`SELECT * FROM ${t} WHERE firmId=?`).all(firmId);}catch{}} res.json({data:payload})}catch(e:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' })}});
 router.post('/import/:firmId',upload.single('file'),(req,res)=>{try{if(!req.file)return res.status(400).json({error:'JSON export file required'}); const parsed=JSON.parse(req.file.buffer.toString('utf8')); if(parsed.format!=='BMAX-EXPORT')return res.status(400).json({error:'Invalid B-MAX export file'}); const firmId=String(req.params.firmId); const counts:any={}; for(const [table,rows] of Object.entries(parsed.tables||{})){ if(!Array.isArray(rows)||!rows.length)continue; if(!['items','parties','categories','units'].includes(table))continue; const cols=db.prepare(`PRAGMA table_info(${table})`).all() as any[]; const names=cols.map((c:any)=>c.name); const usable=names.filter((n:string)=>Object.prototype.hasOwnProperty.call((rows as any[])[0],n)); if(!usable.includes('id'))continue; const sql=`INSERT OR REPLACE INTO ${table} (${usable.map(n=>`[${n}]`).join(',')}) VALUES (${usable.map(()=>'?').join(',')})`; const stmt=db.prepare(sql); let n=0; for(const row of rows as any[]){if(row.firmId!==firmId)continue; stmt.run(...usable.map(k=>row[k]));n++;} counts[table]=n;} res.json({data:{imported:counts}})}catch(e:any){res.status(400).json({error:e.message})}});

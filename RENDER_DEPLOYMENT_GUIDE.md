@@ -1,4 +1,4 @@
-# B-MAX v1.4.0 — Private backend deployment package for Render
+# B-MAX v1.4.12 — Private backend deployment package for Render
 
 This archive is **backend-only**. Its contents are intended to be placed at the ROOT of the existing private source repository connected to the existing Render web service. Do not upload this as a nested `backend/` folder.
 
@@ -28,8 +28,12 @@ If the Render service does not provide `RENDER_SERVICE_ID`, add the environment 
 3. Open the service's root URL; it should return JSON with `name: B-MAX`, `status: running`, and `version: 1.4.0`.
 4. Test a safe health endpoint first. Do not test restore/backup or real customer writes until database persistence and backups are confirmed.
 
-## Important database note
-The backend currently uses SQLite and a local `data` path by default. A successful deploy does **not** prove the database is persistent across restarts. Before using production customer data, confirm a persistent Render disk is mounted and `DB_PATH` points into that mount; do not commit the database into source control.
+## Important database and product-image persistence note
+The backend stores SQLite data under `DB_PATH` and uploaded product photos under `UPLOADS_DIR` (default: `<DB_PATH>/uploads`). Render's ordinary service filesystem is ephemeral. Before using production customer data or uploading item photos, attach a persistent disk to the existing service (commonly mounted at `/var/data`) and set both environment variables:
+- `DB_PATH=/var/data`
+- `UPLOADS_DIR=/var/data/uploads`
+
+Keep both paths on the same persistent disk so item records and their `/uploads/items/<filename>` photos survive deploys/restarts. Do not commit the database, uploaded photos, customer backups, or secrets into source control. A successful deploy alone does **not** prove persistence; verify the mounted disk and environment values in the existing Render service before production use.
 
 ## Validation status
 Archive structure, package JSON, required backend source, and port-binding logic were checked. This archive has not been deployed to Render from this environment, so live deployment and data persistence must be verified after upload.

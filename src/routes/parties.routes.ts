@@ -377,8 +377,19 @@ router.put('/:id', (req: Request, res: Response) => {
 
 router.delete('/:id', (req: Request, res: Response) => {
   try {
-    db.prepare('UPDATE parties SET isActive = 0, updatedAt = ? WHERE id = ?').run(new Date().toISOString(), req.params.id);
-    res.json({ success: true });
+    const party:any=db.prepare('SELECT id,firmId,openingBalance,isActive FROM parties WHERE id=?').get(req.params.id);
+    if(!party)return res.status(404).json({error:'Party not found'});
+    const deps:any=db.prepare(`SELECT
+      (SELECT COUNT(*) FROM documents WHERE partyId=? AND firmId=?) documents,
+      (SELECT COUNT(*) FROM payments WHERE partyId=? AND firmId=?) payments,
+      (SELECT COUNT(*) FROM expenses WHERE partyId=? AND firmId=?) expenses,
+      (SELECT COUNT(*) FROM job_work_orders WHERE partyId=? AND firmId=?) jobWork,
+      (SELECT COUNT(*) FROM crm_loyalty_ledger WHERE partyId=? AND firmId=?) loyalty`).get(party.id,party.firmId,party.id,party.firmId,party.id,party.firmId,party.id,party.firmId,party.id,party.firmId) as any;
+    const dependencyCount=Object.values(deps).reduce<number>((sum, value) => sum + Number(value ?? 0), 0)+(Math.abs(Number(party.openingBalance||0))>.005?1:0);
+    if(dependencyCount>0)return res.status(409).json({error:'Party cannot be deleted because it is linked to transactions, payments, expenses, job-work or loyalty records, or an opening balance.',data:{hasDependencies:true,dependencyCount,dependencies:deps,openingBalance:Number(party.openingBalance||0)}});
+    const changed=db.prepare('UPDATE parties SET isActive=0,updatedAt=? WHERE id=? AND firmId=? AND COALESCE(isActive,1)=1').run(new Date().toISOString(),party.id,party.firmId);
+    if(!changed.changes)return res.status(409).json({error:'Party is already inactive.'});
+    res.json({success:true,message:'Party moved to Recycle Bin'});
   } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 

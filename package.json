@@ -1,6 +1,6 @@
 {
   "name": "bmax-backend",
-  "version": "1.4.11",
+  "version": "1.4.12",
   "description": "B-MAX Backend Server",
   "main": "dist/server.js",
   "scripts": {
@@ -37,7 +37,7 @@
   "overrides": {
     "tar": "7.5.22",
     "@xmldom/xmldom": "0.9.12",
-    "joi": "17.13.8",
+    "joi": "17.13.9",
     "js-yaml": "5.4.2",
     "minimatch@^9.0.4": "9.0.7",
     "minimatch@^3.0.0": "3.1.4",

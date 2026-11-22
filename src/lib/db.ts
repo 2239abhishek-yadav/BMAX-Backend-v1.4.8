@@ -1010,11 +1010,20 @@ export function initializeDatabase() {
     db.exec(`CREATE TABLE IF NOT EXISTS item_companies (
       id TEXT PRIMARY KEY, firmId TEXT NOT NULL, name TEXT NOT NULL,
       createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL,
+      isActive INTEGER NOT NULL DEFAULT 1,
       FOREIGN KEY (firmId) REFERENCES firms(id) ON DELETE CASCADE
     );`);
+    const companyColsNow = (db.prepare('PRAGMA table_info(item_companies)').all() as any[]).map(c=>c.name);
+    if (!companyColsNow.includes('isActive')) db.exec('ALTER TABLE item_companies ADD COLUMN isActive INTEGER NOT NULL DEFAULT 1');
+    // Allow a company name to be reused after it is moved to the recycle bin,
+    // while keeping active company names unique within each firm.
+    const companyIndex:any=db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_item_companies_firm_name'").get();
+    if (!String(companyIndex?.sql||'').includes('WHERE COALESCE(isActive,1)=1')) {
+      db.exec('DROP INDEX IF EXISTS idx_item_companies_firm_name');
+      db.exec('CREATE UNIQUE INDEX idx_item_companies_firm_name ON item_companies(firmId, name COLLATE NOCASE) WHERE COALESCE(isActive,1)=1');
+    }
     const itemColsNow = (db.prepare('PRAGMA table_info(items)').all() as any[]).map(c=>c.name);
     if (!itemColsNow.includes('companyId')) db.exec('ALTER TABLE items ADD COLUMN companyId TEXT');
-    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_item_companies_firm_name ON item_companies(firmId, name COLLATE NOCASE)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_items_company ON items(firmId, companyId)');
   } catch (e) { console.warn('[DB] item-company migration skipped:', e); }
 

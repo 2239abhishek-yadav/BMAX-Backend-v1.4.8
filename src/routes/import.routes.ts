@@ -36,6 +36,38 @@ function cellStr(v: any): string {
   return String(v).trim();
 }
 
+/** Normalize item names for reliable Opening Stock Excel matching. */
+function normalizeOpeningStockItemName(value: any): string {
+  return cellStr(value).normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+}
+function normalizeOpeningStockCode(value: any): string {
+  return cellStr(value).normalize('NFKC').toLocaleLowerCase().trim();
+}
+
+/** Safe item-import error mapping. Internal database/Node details stay in server logs only. */
+function getSafeItemImportError(err: any): string {
+  const message = String(err?.message || err || '');
+  const lower = message.toLowerCase();
+  if (/barcode already assigned|duplicate barcode/.test(lower)) return 'Barcode is already assigned to another item. Check the barcode before importing.';
+  if (/unit 1 and unit 2 must be different/.test(lower)) return 'Unit 1 and Unit 2 must be different.';
+  if (/unit conversion must be > 0/.test(lower)) return 'Unit Conversion must be greater than 0 when Unit 2 is selected.';
+  if (/opening stock/.test(lower) && /(decimal|precision|whole|integer)/.test(lower)) return 'Opening Stock must use a quantity format allowed for this item.';
+  if (/minimum stock/.test(lower) && /(decimal|precision|whole|integer)/.test(lower)) return 'Minimum Stock Level must use a quantity format allowed for this item.';
+  if (/unique constraint failed/.test(lower)) {
+    if (/\.barcode/.test(lower)) return 'This barcode is already used by another item.';
+    if (/\.itemcode|\.sku/.test(lower)) return 'This Item Code is already used by another item.';
+    if (/\.name/.test(lower)) return 'An item with this name already exists.';
+    return 'This row conflicts with an existing item. Check its name, item code and barcode.';
+  }
+  if (/not null constraint failed/.test(lower)) return 'A required item detail is missing. Check the row values and try again.';
+  if (/check constraint failed/.test(lower)) return 'One of the values is outside the allowed range. Check rates, quantities and discount percentages.';
+  if (/foreign key constraint failed/.test(lower)) return 'A selected Unit, Category or Company is no longer available. Check the master details and try again.';
+  return 'This item could not be imported. Check this row’s item details; if the issue continues, contact B-MAX support with the row number.';
+}
+function logImportFailure(stage: string, err: any) {
+  console.error(`[BMAX Excel Import] ${stage} failed`, err?.stack || err?.message || err);
+}
+
 
 /* Automatic master creation for Excel imports. Preview stays side-effect free; commit creates missing masters. */
 function ensureUnit(firmId: string, rawName: string, now: string): string | null {
@@ -291,6 +323,7 @@ router.post('/items/commit', (req: Request, res: Response) => {
 
     const now = new Date().toISOString();
     let inserted = 0, updated = 0, skipped = 0;
+    const failedRows: Array<{ rowNum: number; itemName: string; error: string }> = [];
     const allowDuplicateItems = getModuleSettings(String(firmId), 'items').allowDuplicateItems;
     const importBarcodeOwners = new Map<string, string>();
 
@@ -314,12 +347,16 @@ router.post('/items/commit', (req: Request, res: Response) => {
     `);
 
     const importRows = db.transaction(() => {
-      for (const row of rows) {
+      for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+        const row = rows[rowIndex];
         if (row.status !== 'ok') { skipped++; continue; }
-        const d = row.data;
+        const d = row.data || {};
+        const savepoint = `bmax_render_item_import_${rowIndex}`;
+        db.exec(`SAVEPOINT ${savepoint}`);
+        try {
         const decimalEnabled = d.decimalEnabled === true || d.decimalEnabled === 1 || String(d.decimalEnabled||'').toLowerCase() === 'yes' ? 1 : 0;
-        assertItemQuantityPrecision({name:d.name,decimalEnabled}, d.openingStock ?? 0, 'Opening stock');
-        assertItemQuantityPrecision({name:d.name,decimalEnabled}, d.minStockLevel ?? 0, 'Minimum stock level');
+        assertItemQuantityPrecision({name:d.name,decimalEnabled}, d.openStock ?? 0, 'Opening stock');
+        assertItemQuantityPrecision({name:d.name,decimalEnabled}, d.minStockLevel ?? d.minStock ?? 0, 'Minimum stock level');
         const existing = allowDuplicateItems ? null : db.prepare('SELECT id FROM items WHERE firmId = ? AND LOWER(TRIM(name)) = LOWER(TRIM(?)) AND isActive=1 LIMIT 1').get(firmId, d.name) as any;
         const normalizedBarcode = cellStr(d.barcode).trim().toLowerCase();
         if (normalizedBarcode) {
@@ -328,13 +365,12 @@ router.post('/items/commit', (req: Request, res: Response) => {
           const priorName = importBarcodeOwners.get(normalizedBarcode);
           const currentName = String(d.name || '').trim().toLowerCase();
           if (priorName && (allowDuplicateItems || priorName !== currentName)) throw new Error(`Duplicate barcode in this Excel file: ${d.barcode}. Every separate item must have a unique barcode.`);
-          if (!priorName) importBarcodeOwners.set(normalizedBarcode, currentName);
         }
         const masters = resolveOrCreateItemMasters(firmId, d, now);
         d.unitId = masters.unitId; d.secondaryUnitId = masters.secondaryUnitId; d.categoryId = masters.categoryId; d.companyId = masters.companyId;
 
         if (existing) {
-          if (!overwriteExisting) { skipped++; continue; }
+          if (!overwriteExisting) { skipped++; db.exec(`RELEASE SAVEPOINT ${savepoint}`); continue; }
           updateStmt.run(
             d.type, d.hsnCode, d.itemCode, d.itemCode || null, d.barcode || null, d.description,
             d.categoryId || null, d.companyId || null, d.unitId || null, d.secondaryUnitId || null,
@@ -357,13 +393,23 @@ router.post('/items/commit', (req: Request, res: Response) => {
           );
           inserted++;
         }
+        if (normalizedBarcode) importBarcodeOwners.set(normalizedBarcode, String(d.name || '').trim().toLowerCase());
+        db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+        } catch (rowError: any) {
+          db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+          db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+          skipped++;
+          failedRows.push({ rowNum: Number(row.rowNum || rowIndex + 2), itemName: cellStr(d.name) || '(Unnamed item)', error: getSafeItemImportError(rowError) });
+          logImportFailure(`items commit row ${Number(row.rowNum || rowIndex + 2)}`, rowError);
+        }
       }
     });
 
     importRows();
-    res.json({ success: true, data: { inserted, updated, skipped } });
+    res.json({ success: true, data: { inserted, updated, skipped, failed: failedRows.length, failedRows } });
   } catch (err: any) {
-    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
+    logImportFailure('items commit', err);
+    res.status(500).json({ error: 'The item import could not be completed. No technical details were exposed. Please retry; if it continues, contact B-MAX support.', code: 'ITEM_IMPORT_FAILED' });
   }
 });
 
@@ -506,43 +552,132 @@ router.get('/opening-stock/template', (_req: Request, res: Response) => {
     const headers = ['Item Name*','Opening Stock*','Item Code (optional)','Batch Number (optional)','Packing (optional)','MFG Date (optional)','Expiry Date (optional)','Purchase Rate (optional)','MRP (optional)','Selling Rate (optional)','Unit 1 (optional)','Category Name (optional)','Company Name (optional)'];
     const sample = ['Basmati Rice 5kg',100,'SKU-001','B240901','5 KG','2026-09-01','2027-09-01',380,450,450,'PCS','General','B-MAX Demo Company'];
     const ws = XLSX.utils.aoa_to_sheet([headers,sample]); ws['!cols']=headers.map(()=>({wch:27})); XLSX.utils.book_append_sheet(wb,ws,'Opening Stock');
-    const ins=XLSX.utils.aoa_to_sheet([['B-MAX — Opening Stock Import'],[''],['Only Item Name and Opening Stock are required.'],['Batch, packing, MFG/Expiry dates and rates are optional.'],['If batch tracking is enabled in B-MAX, a supplied Batch Number creates/updates the batch record.'],['If batch tracking is disabled, batch-specific fields are ignored; the item opening stock is still imported.'],['Multiple rows for the same item are allowed; their quantities are added.'],['Item Code is optional but helps identify an item when names are duplicated.'],['If the item is missing, B-MAX creates it automatically. Unit 1, Category and Company are also created automatically when supplied.'],['Do not change the column headers.']]); ins['!cols']=[{wch:100}]; XLSX.utils.book_append_sheet(wb,ins,'Instructions');
+    const ins=XLSX.utils.aoa_to_sheet([['B-MAX — Opening Stock Import'],[''],['Only Item Name and Opening Stock are required.'],['Batch, packing, MFG/Expiry dates and rates are optional.'],['If batch tracking is enabled in B-MAX, a supplied Batch Number creates/updates the batch record.'],['If batch tracking is disabled, batch-specific fields are ignored; the item opening stock is still imported.'],['Multiple rows for the same item are allowed; their quantities are added.'],['Items are matched automatically by Item Name, regardless of Excel row order or spacing/case differences.'],['Item Code is optional and is used only to disambiguate duplicate item names.'],['Opening Stock quantities are added to the existing item stock; they do not replace the current quantity.'],['If the item is missing, B-MAX creates it automatically. Unit 1, Category and Company are also created automatically when supplied.'],['Do not change the column headers.']]); ins['!cols']=[{wch:100}]; XLSX.utils.book_append_sheet(wb,ins,'Instructions');
     const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'}); res.setHeader('Content-Disposition','attachment; filename="BMAX_opening_stock_template.xlsx"'); res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'); res.send(buf);
   } catch(err:any){res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });}
 });
 
 router.post('/opening-stock/preview', upload.single('file'), (req: Request,res: Response)=>{
   try{
-    const firmId=String(req.body.firmId||'').trim(); if(!firmId)return res.status(400).json({error:'firmId required'}); if(!req.file)return res.status(400).json({error:'Excel file required'});
-    const wb=XLSX.read(req.file.buffer,{type:'buffer',cellDates:false}); const ws=wb.Sheets[wb.SheetNames[0]]; const rows=XLSX.utils.sheet_to_json(ws,{defval:''}) as any[];
-    const out=rows.map((r:any,i:number)=>{ const name=cellStr(r['Item Name*']||r['Item Name']); const qty=Number(r['Opening Stock*']??r['Opening Stock']); const code=cellStr(r['Item Code (optional)']||r['Item Code']);
-      if(!name)return {row:i+2,status:'error',error:'Item Name is required'}; if(!Number.isFinite(qty)||qty<0)return {row:i+2,status:'error',error:'Opening Stock must be a non-negative number'};
-      let item:any=null; if(code)item=db.prepare('SELECT id,name,itemCode,firmId FROM items WHERE firmId=? AND itemCode=? LIMIT 1').get(firmId,code); if(!item)item=db.prepare('SELECT id,name,itemCode,firmId FROM items WHERE firmId=? AND lower(name)=lower(?) ORDER BY id LIMIT 2').all(firmId,name);
-      if(Array.isArray(item)){ if(item.length>1)return {row:i+2,status:'error',error:`Multiple items match "${name}". Use Item Code.`}; item=item[0]||null; }
-      return {row:i+2,status:'ok',itemId:item?.id||null,itemName:item?.name||name,itemCode:item?.itemCode||code,quantity:qty,batchNumber:cellStr(r['Batch Number (optional)']),packing:cellStr(r['Packing (optional)']),mfgDate:cellStr(r['MFG Date (optional)']),expiryDate:cellStr(r['Expiry Date (optional)']),purchaseRate:Number(r['Purchase Rate (optional)'])||0,mrp:Number(r['MRP (optional)'])||0,sellingRate:Number(r['Selling Rate (optional)'])||0,unit1Short:cellStr(r['Unit 1 (optional)']||r['Unit 1']),catName:cellStr(r['Category Name (optional)']||r['Category Name']),companyName:cellStr(r['Company Name (optional)']||r['Company Name']),autoCreateItem:!item}; });
+    const firmId=String(req.body.firmId||'').trim();
+    if(!firmId)return res.status(400).json({error:'firmId required'});
+    if(!req.file)return res.status(400).json({error:'Excel file required'});
+    const wb=XLSX.read(req.file.buffer,{type:'buffer',cellDates:false});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const rows=XLSX.utils.sheet_to_json(ws,{defval:''}) as any[];
+    // Load the firm-scoped item master once. Matching is by normalized item name,
+    // never by Excel row position. Item Code only disambiguates duplicate names.
+    const allItems=db.prepare('SELECT id,name,itemCode,isActive FROM items WHERE firmId=? ORDER BY id').all(firmId) as any[];
+    const activeItems=allItems.filter((x:any)=>Number(x.isActive)!==0);
+    const out=rows.map((r:any,i:number)=>{
+      const name=cellStr(r['Item Name*']||r['Item Name']);
+      const normalizedName=normalizeOpeningStockItemName(name);
+      const qty=Number(r['Opening Stock*']??r['Opening Stock']);
+      const code=cellStr(r['Item Code (optional)']||r['Item Code']);
+      if(!name)return {row:i+2,status:'error',error:'Item Name is required'};
+      if(!Number.isFinite(qty)||qty<0)return {row:i+2,status:'error',error:'Opening Stock must be a non-negative number'};
+      const nameMatches=activeItems.filter((x:any)=>normalizeOpeningStockItemName(x.name)===normalizedName);
+      const codeMatches=code?activeItems.filter((x:any)=>normalizeOpeningStockCode(x.itemCode)===normalizeOpeningStockCode(code)):[];
+      let item:any=null;
+      if(nameMatches.length===1){
+        item=nameMatches[0];
+      } else if(nameMatches.length>1){
+        const disambiguated=codeMatches.filter((x:any)=>nameMatches.some((n:any)=>n.id===x.id));
+        if(disambiguated.length===1)item=disambiguated[0];
+        else return {row:i+2,status:'error',error:`Multiple active items match "${name}". Enter the correct Item Code to identify the item.`};
+      } else {
+        const inactiveMatch=allItems.find((x:any)=>Number(x.isActive)===0&&normalizeOpeningStockItemName(x.name)===normalizedName);
+        if(inactiveMatch)return {row:i+2,status:'error',error:`"${inactiveMatch.name}" is inactive. Restore the item from Recycle Bin before importing opening stock.`};
+        if(codeMatches.length>1)return {row:i+2,status:'error',error:`Item Code "${code}" matches more than one item. Correct the Item Code.`};
+        if(codeMatches.length===1)return {row:i+2,status:'error',error:`Item Code "${code}" belongs to "${codeMatches[0].name}", not "${name}". Check the item name or code.`};
+      }
+      return {row:i+2,status:'ok',itemId:item?.id||null,itemName:item?.name||name,itemCode:item?.itemCode||code,matchedBy:item?'name':'new',matchLabel:item?'Matched by item name':'New item will be created',quantity:qty,batchNumber:cellStr(r['Batch Number (optional)']),packing:cellStr(r['Packing (optional)']),mfgDate:cellStr(r['MFG Date (optional)']),expiryDate:cellStr(r['Expiry Date (optional)']),purchaseRate:Number(r['Purchase Rate (optional)'])||0,mrp:Number(r['MRP (optional)'])||0,sellingRate:Number(r['Selling Rate (optional)'])||0,unit1Short:cellStr(r['Unit 1 (optional)']||r['Unit 1']),catName:cellStr(r['Category Name (optional)']||r['Category Name']),companyName:cellStr(r['Company Name (optional)']||r['Company Name']),autoCreateItem:!item};
+    });
     res.json({success:true,data:{rows:out}});
-  }catch(err:any){res.status(400).json({error:`Unable to read opening stock Excel: ${err.message}`});}
+  }catch(err:any){res.status(400).json({error:'Unable to read Opening Stock Excel. Check the file format and column headers.'});}
 });
 
 router.post('/opening-stock/commit',(req:Request,res:Response)=>{
   try{
-    const firmId=String(req.body.firmId||'').trim(); const rows=Array.isArray(req.body.rows)?req.body.rows:[]; if(!firmId)return res.status(400).json({error:'firmId required'});
-    const ok=rows.filter((r:any)=>r.status==='ok'); if(!ok.length)return res.status(400).json({error:'No valid rows to import'});
-    const batchEnabled = !!getModuleSettings(firmId, 'items').batchEnabled;
-    let inserted=0,updated=0; const now=new Date().toISOString();
-    const tx=db.transaction(()=>{ const sums=new Map<string,number>();
+    const firmId=String(req.body.firmId||'').trim();
+    const rows=Array.isArray(req.body.rows)?req.body.rows:[];
+    if(!firmId)return res.status(400).json({error:'firmId required'});
+    const ok=rows.filter((r:any)=>r.status==='ok');
+    if(!ok.length)return res.status(400).json({error:'No valid rows to import'});
+    const batchEnabled=!!getModuleSettings(firmId,'items').batchEnabled;
+    let inserted=0,updated=0,batchUpdated=0,createdItems=0;
+    const now=new Date().toISOString();
+    const tx=db.transaction(()=>{
+      const sums=new Map<string,number>();
+      const allFirmItems=db.prepare('SELECT id,name,itemCode,isActive FROM items WHERE firmId=? ORDER BY id').all(firmId) as any[];
+      const activeItems=allFirmItems.filter((x:any)=>Number(x.isActive)!==0);
+      const itemByNameAndCode=new Map<string,string>();
       for(const r of ok){
-        if(!r.itemId){
-          const masters=resolveOrCreateItemMasters(firmId,{name:r.itemName,unit1Short:r.unit1Short||'',unit2Short:'',catName:r.catName||'',companyName:r.companyName||'',convFactor:1},now);
-          const id=uuidv4();
-          db.prepare('INSERT INTO items (id,firmId,name,type,itemCode,sku,categoryId,companyId,unitId,secondaryUnitId,conversionFactor,openingStock,currentStock,isActive,isFavorite,allowNegativeStock,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,firmId,r.itemName,'PRODUCT',r.itemCode||null,r.itemCode||null,masters.categoryId,masters.companyId,masters.unitId,null,1,0,0,1,0,0,now,now);
-          r.itemId=id;
+        const rowName=cellStr(r.itemName);
+        const normalizedName=normalizeOpeningStockItemName(rowName);
+        const rowCode=normalizeOpeningStockCode(r.itemCode);
+        const mappingKey=`${normalizedName}\u0000${rowCode}`;
+        let itemId=itemByNameAndCode.get(mappingKey)||'';
+        if(!itemId){
+          const matches=activeItems;
+          const nameMatches=matches.filter((x:any)=>normalizeOpeningStockItemName(x.name)===normalizedName);
+          if(nameMatches.length===1)itemId=nameMatches[0].id;
+          else if(nameMatches.length>1){
+            const code=rowCode;
+            const codeMatches=nameMatches.filter((x:any)=>normalizeOpeningStockCode(x.itemCode)===code);
+            if(codeMatches.length===1)itemId=codeMatches[0].id;
+            else throw new Error(`Multiple active items match "${rowName}". Re-run preview and provide the correct Item Code.`);
+          } else {
+            const code=rowCode;
+            const codeMatch=code?matches.find((x:any)=>normalizeOpeningStockCode(x.itemCode)===code):null;
+            if(codeMatch)throw new Error(`Item Code "${r.itemCode}" belongs to "${codeMatch.name}", not "${rowName}".`);
+            const inactive=allFirmItems.find((x:any)=>Number(x.isActive)===0&&normalizeOpeningStockItemName(x.name)===normalizedName) as any;
+            if(inactive)throw new Error(`"${inactive.name}" is inactive. Restore it before importing opening stock.`);
+            const masters=resolveOrCreateItemMasters(firmId,{name:rowName,unit1Short:r.unit1Short||'',unit2Short:'',catName:r.catName||'',companyName:r.companyName||'',convFactor:1},now);
+            itemId=uuidv4();
+            db.prepare('INSERT INTO items (id,firmId,name,type,itemCode,sku,categoryId,companyId,unitId,secondaryUnitId,conversionFactor,openingStock,currentStock,isActive,isFavorite,allowNegativeStock,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(itemId,firmId,rowName,'PRODUCT',r.itemCode||null,r.itemCode||null,masters.categoryId,masters.companyId,masters.unitId,null,1,0,0,1,0,0,now,now);
+            activeItems.push({id:itemId,name:rowName,itemCode:r.itemCode||null,isActive:1});
+            createdItems++;
+          }
+          itemByNameAndCode.set(mappingKey,itemId);
         }
-        sums.set(r.itemId,(sums.get(r.itemId)||0)+Number(r.quantity||0));
+        sums.set(itemId,(sums.get(itemId)||0)+Number(r.quantity||0));
+        r.__resolvedItemId=itemId;
       }
-      for(const [itemId,total] of sums){const item=db.prepare('SELECT openingStock,currentStock FROM items WHERE id=? AND firmId=?').get(itemId,firmId) as any; if(!item)continue; const old=Number(item.openingStock||0); const delta=Number(total)-old; db.prepare('UPDATE items SET openingStock=?, currentStock=COALESCE(currentStock,0)+?, updatedAt=? WHERE id=? AND firmId=?').run(Number(total),delta,now,itemId,firmId); updated++;}
-      if(batchEnabled){ for(const r of ok){ if(!r.batchNumber)continue; const b=db.prepare('SELECT id,quantity,openingQuantity FROM inventory_batches WHERE firmId=? AND itemId=? AND batchNumber=? LIMIT 1').get(firmId,r.itemId,r.batchNumber) as any; const openingQty=Number(r.quantity||0); if(b){ const oldOpening=Number(b.openingQuantity||0); const delta=openingQty-oldOpening; db.prepare("UPDATE inventory_batches SET openingQuantity=?, quantity=COALESCE(quantity,0)+?,packing=COALESCE(NULLIF(?,''),packing),mfgDate=COALESCE(NULLIF(?,''),mfgDate),expiryDate=NULL,expiryMonth=?,expiryYear=?,purchaseRate=CASE WHEN ?!=0 THEN ? ELSE purchaseRate END,mrp=CASE WHEN ?!=0 THEN ? ELSE mrp END,sellingRate=CASE WHEN ?!=0 THEN ? ELSE sellingRate END,updatedAt=? WHERE id=?").run(openingQty,delta,r.packing,r.mfgDate,parseExpiryInput(r.expiryDate).month ?? expiryFromLegacyDate(r.expiryDate).month,parseExpiryInput(r.expiryDate).year ?? expiryFromLegacyDate(r.expiryDate).year,Number(r.purchaseRate||0),Number(r.purchaseRate||0),Number(r.mrp||0),Number(r.mrp||0),Number(r.sellingRate||0),Number(r.sellingRate||0),now,b.id); updated++; } else { db.prepare('INSERT INTO inventory_batches(id,firmId,itemId,batchNumber,expiryDate,expiryMonth,expiryYear,mfgDate,packing,purchaseRate,mrp,sellingRate,markup,quantity,openingQuantity,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(uuidv4(),firmId,r.itemId,r.batchNumber,null,parseExpiryInput(r.expiryDate).month ?? expiryFromLegacyDate(r.expiryDate).month,parseExpiryInput(r.expiryDate).year ?? expiryFromLegacyDate(r.expiryDate).year,r.mfgDate||null,r.packing||null,Number(r.purchaseRate||0),Number(r.mrp||0),Number(r.sellingRate||0),0,openingQty,openingQty,now,now); inserted++; } } }
-    }); tx(); res.json({success:true,data:{inserted,updated,batchTrackingApplied:batchEnabled}});
+      // Opening Stock import is additive: every imported quantity increases both
+      // the opening-stock balance and current stock; it never replaces old stock.
+      for(const [itemId,total] of sums){
+        const item=db.prepare('SELECT openingStock,currentStock FROM items WHERE id=? AND firmId=? AND isActive=1').get(itemId,firmId) as any;
+        if(!item)throw new Error('An item changed or became inactive during import. Refresh the preview and try again.');
+        db.prepare('UPDATE items SET openingStock=COALESCE(openingStock,0)+?, currentStock=COALESCE(currentStock,0)+?, updatedAt=? WHERE id=? AND firmId=?').run(total,total,now,itemId,firmId);
+        updated++;
+      }
+      if(batchEnabled){
+        const batchSums=new Map<string,{itemId:string;batchNumber:string;quantity:number;rows:any[]}>();
+        for(const r of ok){
+          const batchNumber=cellStr(r.batchNumber);
+          if(!batchNumber)continue;
+          const itemId=String(r.__resolvedItemId||'');
+          const key=`${itemId}\u0000${batchNumber.toLocaleLowerCase()}`;
+          const entry=batchSums.get(key)||{itemId,batchNumber,quantity:0,rows:[]};
+          entry.quantity+=Number(r.quantity||0);entry.rows.push(r);batchSums.set(key,entry);
+        }
+        for(const entry of batchSums.values()){
+          const r=entry.rows[entry.rows.length-1];
+          const b=db.prepare('SELECT id FROM inventory_batches WHERE firmId=? AND itemId=? AND lower(batchNumber)=lower(?) LIMIT 1').get(firmId,entry.itemId,entry.batchNumber) as any;
+          const expiry=parseExpiryInput(r.expiryDate);const legacy=expiryFromLegacyDate(r.expiryDate);
+          if(b){
+            db.prepare("UPDATE inventory_batches SET openingQuantity=COALESCE(openingQuantity,0)+?, quantity=COALESCE(quantity,0)+?,packing=COALESCE(NULLIF(?,''),packing),mfgDate=COALESCE(NULLIF(?,''),mfgDate),expiryDate=NULL,expiryMonth=COALESCE(?,expiryMonth),expiryYear=COALESCE(?,expiryYear),purchaseRate=CASE WHEN ?!=0 THEN ? ELSE purchaseRate END,mrp=CASE WHEN ?!=0 THEN ? ELSE mrp END,sellingRate=CASE WHEN ?!=0 THEN ? ELSE sellingRate END,updatedAt=? WHERE id=?").run(entry.quantity,entry.quantity,r.packing,r.mfgDate,expiry.month??legacy.month,expiry.year??legacy.year,Number(r.purchaseRate||0),Number(r.purchaseRate||0),Number(r.mrp||0),Number(r.mrp||0),Number(r.sellingRate||0),Number(r.sellingRate||0),now,b.id);
+            batchUpdated++;
+          } else {
+            db.prepare('INSERT INTO inventory_batches(id,firmId,itemId,batchNumber,expiryDate,expiryMonth,expiryYear,mfgDate,packing,purchaseRate,mrp,sellingRate,markup,quantity,openingQuantity,createdAt,updatedAt) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(uuidv4(),firmId,entry.itemId,entry.batchNumber,null,expiry.month??legacy.month,expiry.year??legacy.year,r.mfgDate||null,r.packing||null,Number(r.purchaseRate||0),Number(r.mrp||0),Number(r.sellingRate||0),0,entry.quantity,entry.quantity,now,now);
+            inserted++;
+          }
+        }
+      }
+    });
+    tx();
+    res.json({success:true,data:{inserted,updated,batchUpdated,itemsMatchedByName:ok.filter((r:any)=>r.matchedBy==='name').length,newItemsCreated:createdItems,quantityAdded:ok.reduce((sum:number,r:any)=>sum+Number(r.quantity||0),0),batchTrackingApplied:batchEnabled}});
   }catch(err:any){res.status(400).json({error:err.message});}
 });
 
