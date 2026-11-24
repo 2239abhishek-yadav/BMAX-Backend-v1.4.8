@@ -229,7 +229,7 @@ router.patch('/:id', (req:Request,res:Response)=>{
   try {
     const {firmId}=req.query as any;
     const id=String(req.params.id||'');
-    const {quantity,discountPercentage,discountAmount,price}=req.body||{};
+    const {quantity,secondaryQuantity,discountPercentage,discountAmount,price,batchId,batchNumber}=req.body||{};
     if(!firmId || !id) return res.status(400).json({error:'firmId and counter sale id are required'});
     const result=db.transaction(()=>{
       const row=db.prepare("SELECT * FROM counter_sales WHERE id=? AND firmId=? AND status='open'").get(id,firmId) as any;
@@ -245,26 +245,49 @@ router.patch('/:id', (req:Request,res:Response)=>{
       if(!Number.isFinite(nextPrice)||nextPrice<0) throw new Error('Rate must be zero or greater');
       if(!Number.isFinite(nextDiscount)||nextDiscount<0||nextDiscount>100) throw new Error('Discount must be between 0% and 100%');
       const oldBase=Number(line.baseQuantity||line.quantity||0);
-      const baseQuantity=resolveBaseQty(firmId,item,{quantity:nextQty,secondaryQuantity:line.secondaryQuantity,isSecondaryUnit:line.isSecondaryUnit});
+      const nextSecondary=secondaryQuantity===undefined?Number(line.secondaryQuantity||0):Number(secondaryQuantity);
+      if(!Number.isFinite(nextSecondary)||nextSecondary<0) throw new Error('Unit 2 quantity must be zero or greater');
+      const baseQuantity=resolveBaseQty(firmId,item,{quantity:nextQty,secondaryQuantity:nextSecondary,isSecondaryUnit:line.isSecondaryUnit});
       const delta=baseQuantity-oldBase;
+      const nextBatchId=batchId===undefined?String(line.batchId||''):String(batchId||'');
+      const activeBatchCount=Number((db.prepare('SELECT COUNT(*) n FROM inventory_batches WHERE firmId=? AND itemId=? AND quantity>0').get(firmId,line.itemId) as any)?.n||0);
+      let nextBatch:any=null;
+      if(nextBatchId){
+        nextBatch=db.prepare('SELECT * FROM inventory_batches WHERE id=? AND firmId=? AND itemId=?').get(nextBatchId,firmId,line.itemId) as any;
+        if(!nextBatch) throw new Error('Selected batch does not belong to this item or is no longer available');
+      } else if(activeBatchCount>0) {
+        throw new Error(`Please select an available batch for ${item.name}`);
+      }
+      const oldBatchId=String(line.batchId||'');
+      if(Number(row.stockReserved||0)===1 && nextBatchId!==oldBatchId && nextBatch && !isNegativeStockAllowed(firmId) && Number(nextBatch.quantity||0)<baseQuantity-0.0001){
+        throw new Error(`Insufficient stock in selected batch ${nextBatch.batchNumber||''}. Available: ${Number(nextBatch.quantity||0)}, Required: ${baseQuantity}`);
+      }
       if(Number(row.stockReserved||0)===1 && delta>0 && !isNegativeStockAllowed(firmId) && Number(item.currentStock||0)-delta < -0.0001) throw new Error(`Insufficient stock for ${item.name}. Available: ${Number(item.currentStock||0)}, Required: ${delta}`);
       if(Number(row.stockReserved||0)===1 && delta!==0){
         const nowStock=new Date().toISOString();
         db.prepare('UPDATE items SET currentStock=currentStock-?,updatedAt=? WHERE id=? AND firmId=?').run(delta,nowStock,item.id,firmId);
-        if(line.batchId){
-          const b=db.prepare('SELECT quantity FROM inventory_batches WHERE id=? AND firmId=?').get(line.batchId,firmId) as any;
+        if(oldBatchId && nextBatchId===oldBatchId){
+          const b=db.prepare('SELECT quantity FROM inventory_batches WHERE id=? AND firmId=?').get(oldBatchId,firmId) as any;
           if(!b) throw new Error('Selected batch not found');
           if(delta>0 && !isNegativeStockAllowed(firmId) && Number(b.quantity||0)-delta < -0.0001) throw new Error(`Insufficient batch stock for ${item.name}`);
-          db.prepare('UPDATE inventory_batches SET quantity=quantity-?,updatedAt=? WHERE id=? AND firmId=?').run(delta,nowStock,line.batchId,firmId);
+          db.prepare('UPDATE inventory_batches SET quantity=quantity-?,updatedAt=? WHERE id=? AND firmId=?').run(delta,nowStock,oldBatchId,firmId);
         }
         const godownId=line.godownId||resolveDefaultGodown(firmId).id;
         applyStoreStockForCounter(firmId,item.id,String(godownId),-delta,item.name,isNegativeStockAllowed(firmId),nowStock);
       }
+      if(Number(row.stockReserved||0)===1 && nextBatchId!==oldBatchId){
+        const nowBatch=new Date().toISOString();
+        if(oldBatchId) db.prepare('UPDATE inventory_batches SET quantity=quantity+?,updatedAt=? WHERE id=? AND firmId=?').run(oldBase,nowBatch,oldBatchId,firmId);
+        if(nextBatchId){
+          if(!isNegativeStockAllowed(firmId) && Number(nextBatch.quantity||0)-baseQuantity < -0.0001) throw new Error(`Insufficient batch stock for ${item.name}`);
+          db.prepare('UPDATE inventory_batches SET quantity=quantity-?,updatedAt=? WHERE id=? AND firmId=?').run(baseQuantity,nowBatch,nextBatchId,firmId);
+        }
+      }
       const calc=calculateLine(nextPrice,baseQuantity,nextDiscount,Number(line.taxRate||item.taxRate||0),discountAmount===undefined?undefined:Number(discountAmount));
       const now=new Date().toISOString();
-      db.prepare('UPDATE counter_sale_items SET quantity=?,baseQuantity=?,price=?,discountPercentage=?,discountAmount=?,taxRate=?,taxAmount=?,amount=?,updatedAt=? WHERE id=? AND firmId=?').run(nextQty,baseQuantity,nextPrice,calc.discountPercentage,calc.discount,calc.taxRate,calc.taxAmount,calc.amount,now,line.id,firmId);
+      db.prepare('UPDATE counter_sale_items SET quantity=?,baseQuantity=?,price=?,discountPercentage=?,discountAmount=?,taxRate=?,secondaryQuantity=?,taxAmount=?,amount=?,batchId=?,batchNumber=?,updatedAt=? WHERE id=? AND firmId=?').run(nextQty,baseQuantity,nextPrice,calc.discountPercentage,calc.discount,calc.taxRate,nextSecondary,calc.taxAmount,calc.amount,nextBatchId||null,nextBatch?.batchNumber||((nextBatchId===oldBatchId)?line.batchNumber:null),now,line.id,firmId);
       db.prepare('UPDATE counter_sales SET total=?,roundOff=0,updatedAt=? WHERE id=? AND firmId=?').run(calc.total,now,id,firmId);
-      return {id,quantity:nextQty,price:nextPrice,discountPercentage:calc.discountPercentage,discountAmount:calc.discount,taxRate:calc.taxRate,taxAmount:calc.taxAmount,amount:calc.amount,total:calc.total};
+      return {id,quantity:nextQty,secondaryQuantity:nextSecondary,price:nextPrice,discountPercentage:calc.discountPercentage,discountAmount:calc.discount,taxRate:calc.taxRate,taxAmount:calc.taxAmount,amount:calc.amount,batchId:nextBatchId||null,batchNumber:nextBatch?.batchNumber||null,total:calc.total};
     });
     res.json({success:true,data:result});
   } catch(e:any) { res.status(400).json({error:e.message}); }

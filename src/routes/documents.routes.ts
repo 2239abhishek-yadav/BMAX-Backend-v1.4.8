@@ -28,6 +28,68 @@ function auditSnapshot(doc:any,items:any[]=[]){const s:any={}; for(const k of AU
 function auditDiff(a:any,b:any){const c:any={}; for(const k of AUDIT_FIELDS)if(String(a?.[k]??'')!==String(b?.[k]??''))c[k]={old:a?.[k]??null,new:b?.[k]??null}; const rates=(s:any)=>(s?.items||[]).map((x:any)=>`${x.name||x.itemId||'Item'}: ${Number(x.price||0).toFixed(2)}`).join(' | '); if(rates(a)!==rates(b))c['Item Rates']={old:rates(a)||'—',new:rates(b)||'—'}; const qty=(s:any)=>(s?.items||[]).map((x:any)=>`${x.name||x.itemId||'Item'}: ${Number(x.quantity||0)}`).join(' | '); if(qty(a)!==qty(b))c['Item Quantities']={old:qty(a)||'—',new:qty(b)||'—'}; return c;}
 function writeDocumentAudit(documentId:string,firmId:string,action:string,oldDoc:any,oldItems:any[],newDoc:any,newItems:any[],req:any,note?:string){const changes=action==='MODIFIED'?auditDiff(auditSnapshot(oldDoc,oldItems),auditSnapshot(newDoc,newItems)):action==='CREATED'?{documentNumber:{old:null,new:newDoc?.documentNumber||null},total:{old:null,new:newDoc?.total??0}}:{documentNumber:{old:oldDoc?.documentNumber||null,new:null},total:{old:oldDoc?.total??0,new:null}}; db.prepare(`INSERT INTO document_audit_logs (id,firmId,documentId,action,changesJson,note,actorId,actorName,createdAt) VALUES (?,?,?,?,?,?,?,?,?)`).run(uuidv4(),firmId,documentId,action,JSON.stringify(changes),note||null,req?.body?.userId||req?.user?.id||null,req?.body?.userName||req?.user?.name||'System',new Date().toISOString());}
 
+// Move a document to Recycle Bin only after all active payment entries allocated
+// to it have been removed. This preserves the user's payment-first deletion hierarchy.
+function moveDocumentToRecycleBin(req: Request, res: Response) {
+  try {
+    const documentId = String(req.params.id || '').trim();
+    if (!documentId) return res.status(400).json({ error: 'Document ID is required' });
+    const requestedFirmId = String(req.body?.firmId || req.query?.firmId || '').trim();
+    const outcome:any = db.transaction(() => {
+      const document:any = requestedFirmId
+        ? db.prepare('SELECT * FROM documents WHERE id=? AND firmId=?').get(documentId, requestedFirmId)
+        : db.prepare('SELECT * FROM documents WHERE id=?').get(documentId);
+      if (!document) return { status: 404, error: 'Document not found in this company.' };
+      const firmId = String(document.firmId || '');
+      if (Number(document.isDeleted || 0) === 1) {
+        return { status: 200, success: true, message: 'Document is already in Recycle Bin.' };
+      }
+
+      const activePayments:any[] = db.prepare(`
+        SELECT DISTINCT p.id, p.type
+        FROM payments p
+        WHERE p.firmId = ?
+          AND COALESCE(p.isDeleted, 0) = 0
+          AND (
+            p.linkedDocumentId = ?
+            OR EXISTS (
+              SELECT 1 FROM payment_allocations pa
+              WHERE pa.firmId = p.firmId
+                AND pa.paymentId = p.id
+                AND pa.documentId = ?
+                AND COALESCE(pa.amount, 0) > 0
+            )
+          )
+        ORDER BY p.createdAt ASC, p.id ASC
+      `).all(firmId, documentId, documentId) as any[];
+
+      if (activePayments.length) {
+        return {
+          status: 409,
+          error: 'Payment already received against this bill. Delete the linked payment/receipt entry first, then delete the bill.',
+          code: 'DOCUMENT_HAS_ACTIVE_PAYMENTS',
+          paymentCount: activePayments.length
+        };
+      }
+
+      const now = new Date().toISOString();
+      const updated = db.prepare(
+        'UPDATE documents SET isDeleted=1, updatedAt=? WHERE id=? AND firmId=? AND COALESCE(isDeleted,0)=0'
+      ).run(now, documentId, firmId);
+      if (!updated.changes) return { status: 409, error: 'Document could not be moved to Recycle Bin. Refresh and try again.' };
+
+      const oldItems:any[] = db.prepare('SELECT * FROM document_items WHERE documentId=?').all(documentId);
+      writeDocumentAudit(documentId, firmId, 'DELETED', document, oldItems, null, [], req, 'Transaction deleted / moved to recycle bin');
+      return { status: 200, success: true, message: 'Document moved to Recycle Bin' };
+    })();
+
+    const { status, ...payload } = outcome;
+    return res.status(status).json(payload);
+  } catch (err:any) {
+    return res.status(500).json({ error: 'Bill could not be deleted. Please retry or contact B-MAX support.', code: 'DOCUMENT_TRASH_FAILED' });
+  }
+}
+
 function firmTaxConfig(firmId:string){ const f:any=db.prepare('SELECT gstType,vatRate,gstin FROM firms WHERE id=?').get(firmId); const mode=String(f?.gstType||'regular'); return {mode, gstin:String(f?.gstin||'').trim(), enabled:mode==='vat' || (mode==='regular' && !!String(f?.gstin||'').trim()), vatRate:Number(f?.vatRate||5)}; }
 function validateLineTax(firmId:string, rate:number, documentType?:string){ const c=firmTaxConfig(firmId); const salesSide=['sale_invoice','sale_order','sale_return','sale_return_challan','sale_quotation','sale_proforma','delivery_challan'].includes(String(documentType||'')); if(salesSide && c.mode!=='vat' && !c.enabled && rate!==0) throw new Error(c.mode==='composition' ? 'Composition taxpayers cannot collect GST separately; use a Bill of Supply.' : 'Sales GST requires Regular GST mode and a GSTIN. Set the item tax rate to 0% or add the firm GSTIN.'); if(c.mode==='vat'){ if(!Number.isFinite(rate)||rate<0||rate>100) throw new Error('VAT rate must be between 0% and 100%'); return; } if(!VALID_GST_SLABS.includes(rate)) throw new Error('GST rate must be one of 0%, 5% or 18%'); }
 function lineExpiry(item:any): { month:number|null; year:number|null } {
@@ -1468,28 +1530,25 @@ router.put('/:id' , (req: Request, res: Response) => {
   }
 });
 
-// PATCH trash/delete document
-router.patch('/:id/trash', (req: Request, res: Response) => {
-  try {
-    const oldDoc:any=db.prepare('SELECT * FROM documents WHERE id=?').get(req.params.id);
-    if(!oldDoc) return res.status(404).json({error:'Document not found'});
-    const oldItems:any[]=db.prepare('SELECT * FROM document_items WHERE documentId=?').all(req.params.id);
-    const firmId=String(req.body?.firmId||oldDoc.firmId||'');
-    db.prepare('UPDATE documents SET isDeleted = 1, updatedAt = ? WHERE id = ? AND firmId = ?').run(new Date().toISOString(), req.params.id, firmId);
-    writeDocumentAudit(req.params.id,firmId,'DELETED',oldDoc,oldItems,null,[],req,'Transaction deleted / moved to recycle bin');
-    res.json({ success: true, message: 'Document trashed' });
-  } catch (err: any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
-});
+// PATCH trash/delete document. Both API methods share the same payment-first guard.
+router.patch('/:id/trash', (req: Request, res: Response) => moveDocumentToRecycleBin(req, res));
 
 // PATCH restore document
 router.patch('/:id/restore', (req: Request, res: Response) => {
   try {
-    db.prepare('UPDATE documents SET isDeleted = 0, updatedAt = ? WHERE id = ?').run(new Date().toISOString(), req.params.id);
-    res.json({ success: true, message: 'Document restored' });
-  } catch (err: any) {
-    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
+    const firmId = String(req.body?.firmId || req.query?.firmId || '').trim();
+    const result = firmId
+      ? db.prepare('UPDATE documents SET isDeleted=0, updatedAt=? WHERE id=? AND firmId=?').run(new Date().toISOString(), req.params.id, firmId)
+      : db.prepare('UPDATE documents SET isDeleted=0, updatedAt=? WHERE id=?').run(new Date().toISOString(), req.params.id);
+    if (!result.changes) return res.status(404).json({ error: 'Document not found in this company.' });
+    return res.json({ success: true, message: 'Document restored' });
+  } catch (err:any) {
+    return res.status(500).json({ error: 'Document could not be restored. Please retry.', code: 'DOCUMENT_RESTORE_FAILED' });
   }
 });
+
+// DELETE document: soft-delete only; paid bills must have their payment entries removed first.
+router.delete('/:id', (req: Request, res: Response) => moveDocumentToRecycleBin(req, res));
 
 // GET next document number (preview only — does not consume the number).
 // If seriesId is given, previews that series; otherwise falls back to the
@@ -1537,18 +1596,8 @@ router.get('/next-number/:type', (req: Request, res: Response) => {
   }
 });
 
-// DELETE document: hard-delete is intentionally disabled. All transaction deletes
-// are soft-deletes so the record remains recoverable in Utilities & Tools -> Recycle Bin.
-router.delete('/:id', (req: Request, res: Response) => {
-  try {
-    const now = new Date().toISOString();
-    const r = db.prepare('UPDATE documents SET isDeleted=1, updatedAt=? WHERE id=?').run(now, req.params.id);
-    if (!r.changes) return res.status(404).json({ error: 'Document not found' });
-    res.json({ success: true, message: 'Document moved to recycle bin' });
-  } catch (err: any) {
-    res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' });
-  }
-});
+// DELETE document: uses the same firm-scoped payment-first soft-delete flow.
+router.delete('/:id', (req: Request, res: Response) => moveDocumentToRecycleBin(req, res));
 
 // Receive an advance against a saved sales quotation/order. This is a real
 // receipt (cash/bank movement) but is intentionally NOT allocated to a bill
