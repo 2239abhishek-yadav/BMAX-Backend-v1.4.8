@@ -11,6 +11,7 @@ import activationRouter from './routes/activation.routes';
 import addonRouter from './routes/addon.routes';
 import profileRouter from './routes/profile.routes';
 import cloudBackupRouter from './routes/cloud-backup.routes';
+import nvidiaAiRouter from './routes/nvidia-ai.routes';
 import { ensureCrmSchema } from './lib/crm';
 import { accessControl } from './middleware/access-control';
 import { previewAddonActivation, activateAddon } from './lib/subscription';
@@ -92,6 +93,8 @@ app.use('/api/profile', profileRouter);
 // Customer cloud backups are authorized by a short-lived Hostinger account session.
 app.use('/api/cloud-backup', cloudBackupRouter);
 app.use(accessControl);
+// NVIDIA AI/OCR gateway: validates the central account session and firm ownership before forwarding requests.
+app.use('/api/nvidia-ai', nvidiaAiRouter);
 app.use('/api', router);
 
 

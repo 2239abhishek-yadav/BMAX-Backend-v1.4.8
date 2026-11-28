@@ -117,7 +117,7 @@ router.get('/:firmId/ai', (req: Request, res: Response) => {
     const cfg: any = Object.fromEntries(rows.map((r:any) => [r.settingKey, r.settingValue]));
     // Remove obsolete cloud-AI credentials/configuration from earlier versions.
     db.prepare("DELETE FROM firm_settings WHERE firmId = ? AND settingType = 'ai' AND settingKey IN ('apiKey','provider','model')").run(req.params.firmId);
-    res.json({ success:true, data:{ enabled: cfg.enabled === undefined ? true : String(cfg.enabled) !== 'false', engine:'tesseract.js-local' } });
+    res.json({ success:true, data:{ enabled: cfg.enabled === undefined ? true : String(cfg.enabled) !== 'false', engine:'nvidia-nemotron-ocr-v2' } });
   } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
@@ -131,7 +131,7 @@ router.put('/:firmId/ai', (req: Request, res: Response) => {
     else db.prepare("INSERT INTO firm_settings (id, firmId, settingType, settingKey, settingValue, updatedAt) VALUES (?, ?, 'ai', 'enabled', ?, ?)").run(uuidv4(), firmId, enabled ? 'true' : 'false', now);
     // Delete legacy cloud provider settings and any previously saved API key.
     db.prepare("DELETE FROM firm_settings WHERE firmId = ? AND settingType = 'ai' AND settingKey IN ('apiKey','provider','model')").run(firmId);
-    res.json({ success:true, data:{ enabled, engine:'tesseract.js-local' } });
+    res.json({ success:true, data:{ enabled, engine:'nvidia-nemotron-ocr-v2' } });
   } catch (err:any) { res.status(500).json({ error: 'An unexpected error occurred. Please try again or contact B-MAX support.', code: 'INTERNAL_ERROR' }); }
 });
 
